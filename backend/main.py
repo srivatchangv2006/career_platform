@@ -13,9 +13,13 @@ from routers.applications import router as applications_router
 from routers.application_status_history import (
     router as application_status_history_router,
 )
+from routers.ai_interactions import (
+    router as ai_interactions_router,
+)
 from routers.application_answers import (
     router as application_answers_router,
 )
+from routers.agent_memory import router as agent_memory_router
 from routers.job_screening_questions import (
     router as job_screening_questions_router,
 )
@@ -36,11 +40,26 @@ app = FastAPI(
 from routers.agent_task_steps import (
     router as agent_task_steps_router,
 )
-
+from routers.agent_feedback import (
+    router as agent_feedback_router,
+)
 from routers.agent_messages import router as agent_messages_router
+from routers.career_goals import router as career_goals_router
+from routers.interview_preparation import (
+    router as interview_preparation_router,
+)
+from routers.interviews import router as interviews_router
+from routers.application_workspace import (
+    router as application_workspace_router,
+)
+app.include_router(interview_preparation_router)
+app.include_router(agent_feedback_router)
 app.include_router(agent_task_steps_router)
 app.include_router(agent_messages_router)
 app.include_router(users_router)
+app.include_router(application_workspace_router)
+app.include_router(interviews_router)
+app.include_router(career_goals_router)
 app.include_router(profiles_router)
 app.include_router(education_router)
 app.include_router(experience_router)
@@ -59,6 +78,8 @@ app.include_router(resume_analysis_router)
 app.include_router(skill_gap_analysis_router)
 app.include_router(job_recommendations_router)
 app.include_router(agent_tasks_router)
+app.include_router(agent_memory_router)
+app.include_router(ai_interactions_router)
 
 @app.get("/")
 def root():
