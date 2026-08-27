@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
+from dependencies.roles import require_role
 from dependencies import get_db
 from dependencies.auth import get_current_user
 
@@ -25,13 +25,13 @@ from schemas.application_timeline import (
     ApplicationTimelineEvent,
     ApplicationTimelineResponse,
 )
-
-
 router = APIRouter(
     prefix="/applications",
     tags=["Application Timeline"],
+    dependencies=[
+        Depends(require_role("CANDIDATE"))
+    ],
 )
-
 
 def enum_value(value) -> str | None:
     if value is None:

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from dependencies import get_db
 from dependencies.auth import get_current_user
+from dependencies.roles import require_role
 from models.user import User
 from schemas.ai_interaction import (
     AIInteractionCreate,
@@ -19,6 +20,7 @@ from services.ai_interaction_service import (
 router = APIRouter(
     prefix="/ai/interactions",
     tags=["AI Interactions"],
+    dependencies=[Depends(require_role("CANDIDATE"))],
 )
 
 

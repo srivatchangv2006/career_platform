@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from dependencies import get_db
-from dependencies.auth import get_current_user
+from dependencies.roles import require_role
 from models.education import Education
 from models.user import User
 from schemas.education import (
@@ -28,7 +28,9 @@ router = APIRouter(
 def create_education(
     education_data: EducationCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     education = Education(
         user_id=current_user.id,
@@ -48,12 +50,18 @@ def create_education(
 )
 def get_my_education(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     education_records = (
         db.query(Education)
-        .filter(Education.user_id == current_user.id)
-        .order_by(Education.start_date.desc())
+        .filter(
+            Education.user_id == current_user.id
+        )
+        .order_by(
+            Education.start_date.desc()
+        )
         .all()
     )
 
@@ -68,7 +76,9 @@ def update_education(
     education_id: UUID,
     education_data: EducationUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     education = (
         db.query(Education)
@@ -85,7 +95,9 @@ def update_education(
             detail="Education record not found",
         )
 
-    update_data = education_data.model_dump(exclude_unset=True)
+    update_data = education_data.model_dump(
+        exclude_unset=True
+    )
 
     for field, value in update_data.items():
         setattr(education, field, value)
@@ -103,7 +115,9 @@ def update_education(
 def delete_education(
     education_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     education = (
         db.query(Education)

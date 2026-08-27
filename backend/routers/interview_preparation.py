@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from dependencies import get_db
 from dependencies.auth import get_current_user
+from dependencies.roles import require_role
 from models.application import Application
 from models.interview import Interview
 from models.interview_preparation import InterviewPreparation
@@ -34,6 +35,9 @@ from services.memory_service import (
 router = APIRouter(
     prefix="/interviews",
     tags=["Interview Preparation"],
+    dependencies=[
+        Depends(require_role("CANDIDATE"))
+    ],
 )
 
 

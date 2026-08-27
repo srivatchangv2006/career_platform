@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from dependencies import get_db
 from dependencies.auth import get_current_user
+from dependencies.roles import require_role
 from models.career_goal import CareerGoal
 from models.career_recommendation import CareerRecommendation
 from models.user import User
@@ -26,6 +27,7 @@ from services.memory_service import search_user_memories
 router = APIRouter(
     prefix="/career-goals",
     tags=["Career Goals"],
+    dependencies=[Depends(require_role("CANDIDATE"))],
 )
 
 

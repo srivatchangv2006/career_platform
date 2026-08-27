@@ -5,10 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from dependencies import get_db
-from dependencies.auth import get_current_user
+from dependencies.roles import require_role
+
 from models.application import Application
 from models.interview import Interview
 from models.user import User
+
 from schemas.interview import (
     InterviewCreate,
     InterviewResponse,
@@ -19,6 +21,9 @@ from schemas.interview import (
 router = APIRouter(
     prefix="/interviews",
     tags=["Interviews"],
+    dependencies=[
+        Depends(require_role("CANDIDATE"))
+    ],
 )
 
 
@@ -30,7 +35,9 @@ router = APIRouter(
 def create_interview(
     interview_data: InterviewCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     application = (
         db.query(Application)
@@ -59,7 +66,7 @@ def create_interview(
         )
 
     interview = Interview(
-        application_id=interview_data.application_id,
+        application_id=application.id,
         interviewer_id=interview_data.interviewer_id,
         interview_type=interview_data.interview_type,
         scheduled_at=interview_data.scheduled_at,
@@ -85,7 +92,9 @@ def create_interview(
 )
 def get_my_interviews(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     return (
         db.query(Interview)
@@ -113,7 +122,9 @@ def get_my_interviews(
 def get_interview(
     interview_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     interview = (
         db.query(Interview)
@@ -147,7 +158,9 @@ def update_interview(
     interview_id: UUID,
     interview_data: InterviewUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     interview = (
         db.query(Interview)
@@ -176,8 +189,7 @@ def update_interview(
 
     if (
         "duration_minutes" in update_data
-        and update_data["duration_minutes"]
-        is not None
+        and update_data["duration_minutes"] is not None
         and update_data["duration_minutes"] <= 0
     ):
         raise HTTPException(
@@ -209,7 +221,9 @@ def update_interview(
 def delete_interview(
     interview_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     interview = (
         db.query(Interview)

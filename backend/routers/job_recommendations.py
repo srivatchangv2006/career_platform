@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from dependencies import get_db
 from dependencies.auth import get_current_user
+from dependencies.roles import require_role
 from models.job import Job, JobStatus
 from models.job_preference import JobPreference
 from models.job_recommendation_item import JobRecommendationItem
@@ -23,6 +24,7 @@ from services.job_recommender import generate_job_recommendations
 router = APIRouter(
     prefix="/recommendations",
     tags=["Job Recommendations"],
+    dependencies=[Depends(require_role("CANDIDATE"))],
 )
 
 

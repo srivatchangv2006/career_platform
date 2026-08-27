@@ -4,20 +4,26 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from dependencies import get_db
-from dependencies.auth import get_current_user
+from dependencies.roles import require_role
+
 from models.application import Application
 from models.job import Job
 from models.resume import Resume
 from models.user import User
+
 from schemas.application import (
     ApplicationCreate,
     ApplicationResponse,
     ApplicationUpdate,
 )
 
+
 router = APIRouter(
     prefix="/applications",
     tags=["Applications"],
+    dependencies=[
+        Depends(require_role("CANDIDATE"))
+    ],
 )
 
 
@@ -29,12 +35,15 @@ router = APIRouter(
 def create_application(
     application_data: ApplicationCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
-    # Check job exists
     job = (
         db.query(Job)
-        .filter(Job.id == application_data.job_id)
+        .filter(
+            Job.id == application_data.job_id
+        )
         .first()
     )
 
@@ -44,13 +53,14 @@ def create_application(
             detail="Job not found",
         )
 
-    # Check resume belongs to current user
     if application_data.resume_id:
         resume = (
             db.query(Resume)
             .filter(
-                Resume.id == application_data.resume_id,
-                Resume.user_id == current_user.id,
+                Resume.id
+                == application_data.resume_id,
+                Resume.user_id
+                == current_user.id,
             )
             .first()
         )
@@ -61,12 +71,13 @@ def create_application(
                 detail="Resume not found",
             )
 
-    # Prevent duplicate application
     existing_application = (
         db.query(Application)
         .filter(
-            Application.job_id == application_data.job_id,
-            Application.user_id == current_user.id,
+            Application.job_id
+            == application_data.job_id,
+            Application.user_id
+            == current_user.id,
         )
         .first()
     )
@@ -97,12 +108,19 @@ def create_application(
 )
 def get_my_applications(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     return (
         db.query(Application)
-        .filter(Application.user_id == current_user.id)
-        .order_by(Application.applied_at.desc())
+        .filter(
+            Application.user_id
+            == current_user.id
+        )
+        .order_by(
+            Application.applied_at.desc()
+        )
         .all()
     )
 
@@ -114,13 +132,16 @@ def get_my_applications(
 def get_application(
     application_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     application = (
         db.query(Application)
         .filter(
             Application.id == application_id,
-            Application.user_id == current_user.id,
+            Application.user_id
+            == current_user.id,
         )
         .first()
     )
@@ -142,13 +163,16 @@ def update_application(
     application_id: UUID,
     application_data: ApplicationUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     application = (
         db.query(Application)
         .filter(
             Application.id == application_id,
-            Application.user_id == current_user.id,
+            Application.user_id
+            == current_user.id,
         )
         .first()
     )
@@ -163,8 +187,10 @@ def update_application(
         resume = (
             db.query(Resume)
             .filter(
-                Resume.id == application_data.resume_id,
-                Resume.user_id == current_user.id,
+                Resume.id
+                == application_data.resume_id,
+                Resume.user_id
+                == current_user.id,
             )
             .first()
         )
@@ -180,7 +206,11 @@ def update_application(
     )
 
     for field, value in update_data.items():
-        setattr(application, field, value)
+        setattr(
+            application,
+            field,
+            value,
+        )
 
     db.commit()
     db.refresh(application)

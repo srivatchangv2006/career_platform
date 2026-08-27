@@ -4,20 +4,26 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from dependencies import get_db
-from dependencies.auth import get_current_user
+from dependencies.roles import require_role
+
 from models.application import Application
 from models.application_answer import ApplicationAnswer
 from models.job_screening_question import JobScreeningQuestion
 from models.user import User
+
 from schemas.application_answer import (
     ApplicationAnswerCreate,
     ApplicationAnswerResponse,
     ApplicationAnswerUpdate,
 )
 
+
 router = APIRouter(
     prefix="/applications",
     tags=["Application Answers"],
+    dependencies=[
+        Depends(require_role("CANDIDATE"))
+    ],
 )
 
 
@@ -30,13 +36,16 @@ def create_application_answer(
     application_id: UUID,
     answer_data: ApplicationAnswerCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     application = (
         db.query(Application)
         .filter(
             Application.id == application_id,
-            Application.user_id == current_user.id,
+            Application.user_id
+            == current_user.id,
         )
         .first()
     )
@@ -50,8 +59,10 @@ def create_application_answer(
     question = (
         db.query(JobScreeningQuestion)
         .filter(
-            JobScreeningQuestion.id == answer_data.question_id,
-            JobScreeningQuestion.job_id == application.job_id,
+            JobScreeningQuestion.id
+            == answer_data.question_id,
+            JobScreeningQuestion.job_id
+            == application.job_id,
         )
         .first()
     )
@@ -65,8 +76,10 @@ def create_application_answer(
     existing_answer = (
         db.query(ApplicationAnswer)
         .filter(
-            ApplicationAnswer.application_id == application_id,
-            ApplicationAnswer.question_id == answer_data.question_id,
+            ApplicationAnswer.application_id
+            == application_id,
+            ApplicationAnswer.question_id
+            == answer_data.question_id,
         )
         .first()
     )
@@ -97,13 +110,16 @@ def create_application_answer(
 def get_application_answers(
     application_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     application = (
         db.query(Application)
         .filter(
             Application.id == application_id,
-            Application.user_id == current_user.id,
+            Application.user_id
+            == current_user.id,
         )
         .first()
     )
@@ -116,8 +132,13 @@ def get_application_answers(
 
     return (
         db.query(ApplicationAnswer)
-        .filter(ApplicationAnswer.application_id == application_id)
-        .order_by(ApplicationAnswer.created_at.asc())
+        .filter(
+            ApplicationAnswer.application_id
+            == application_id
+        )
+        .order_by(
+            ApplicationAnswer.created_at.asc()
+        )
         .all()
     )
 
@@ -131,13 +152,16 @@ def update_application_answer(
     question_id: UUID,
     answer_data: ApplicationAnswerUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     application = (
         db.query(Application)
         .filter(
             Application.id == application_id,
-            Application.user_id == current_user.id,
+            Application.user_id
+            == current_user.id,
         )
         .first()
     )
@@ -151,8 +175,10 @@ def update_application_answer(
     answer = (
         db.query(ApplicationAnswer)
         .filter(
-            ApplicationAnswer.application_id == application_id,
-            ApplicationAnswer.question_id == question_id,
+            ApplicationAnswer.application_id
+            == application_id,
+            ApplicationAnswer.question_id
+            == question_id,
         )
         .first()
     )

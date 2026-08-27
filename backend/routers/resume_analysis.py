@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from dependencies import get_db
 from dependencies.auth import get_current_user
+from dependencies.roles import require_role
 from models.resume import Resume
 from models.resume_analysis import ResumeAnalysis
 from models.user import User
@@ -17,6 +18,7 @@ from services.resume_analyzer import analyze_resume_text
 router = APIRouter(
     prefix="/resumes",
     tags=["Resume Analysis"],
+    dependencies=[Depends(require_role("CANDIDATE"))],
 )
 
 

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from dependencies import get_db
 from dependencies.auth import get_current_user
+from dependencies.roles import require_role
 from models.agent_memory import AgentMemory
 from models.agent_memory_embedding import AgentMemoryEmbedding
 from models.user import User
@@ -21,6 +22,7 @@ from services.embedding_service import generate_embedding
 router = APIRouter(
     prefix="/agent/memory",
     tags=["Agent Memory"],
+    dependencies=[Depends(require_role("CANDIDATE"))],
 )
 
 

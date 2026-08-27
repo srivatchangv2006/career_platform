@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from dependencies import get_db
 from dependencies.auth import get_current_user
+from dependencies.roles import require_role
 from models.agent_task import AgentTask
 from models.agent_task_step import AgentTaskStep
 from models.user import User
@@ -18,6 +19,7 @@ from schemas.agent_task_step import (
 router = APIRouter(
     prefix="/agent/tasks",
     tags=["Agent Task Steps"],
+    dependencies=[Depends(require_role("CANDIDATE"))],
 )
 
 

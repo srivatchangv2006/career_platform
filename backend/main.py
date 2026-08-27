@@ -58,11 +58,19 @@ from routers.application_timeline import (
 from routers.application_ai_activity import (
     router as application_ai_activity_router,
 )
+from routers.recruiter_applications import (
+    router as recruiter_applications_router,
+)
+from routers.recruiter_interviews import (
+    router as recruiter_interviews_router,
+)
 app.include_router(interview_preparation_router)
 app.include_router(agent_feedback_router)
 app.include_router(agent_task_steps_router)
 app.include_router(agent_messages_router)
 app.include_router(users_router)
+app.include_router(recruiter_interviews_router)
+app.include_router(recruiter_applications_router)
 app.include_router(application_ai_activity_router)
 app.include_router(application_timeline_router)
 app.include_router(application_workspace_router)

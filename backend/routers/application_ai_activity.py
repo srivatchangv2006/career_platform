@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-
+from dependencies.roles import require_role
 from dependencies import get_db
 from dependencies.auth import get_current_user
 
@@ -28,8 +28,10 @@ from schemas.application_ai_activity import (
 router = APIRouter(
     prefix="/applications",
     tags=["Application AI Activity"],
+    dependencies=[
+        Depends(require_role("CANDIDATE"))
+    ],
 )
-
 
 def contains_application_id(
     data: dict[str, Any] | None,

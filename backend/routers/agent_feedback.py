@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from dependencies import get_db
 from dependencies.auth import get_current_user
+from dependencies.roles import require_role
 from models.user import User
 from schemas.agent_feedback import (
     AgentFeedbackCreate,
@@ -19,6 +20,7 @@ from services.agent_feedback_service import (
 router = APIRouter(
     prefix="/agent/feedback",
     tags=["Agent Feedback"],
+    dependencies=[Depends(require_role("CANDIDATE"))],
 )
 
 

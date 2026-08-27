@@ -3,9 +3,14 @@ from sqlalchemy.orm import Session
 
 from dependencies import get_db
 from dependencies.auth import get_current_user
+from dependencies.roles import require_role
 from models.profile import Profile
 from models.user import User
-from schemas.profile import ProfileCreate, ProfileResponse, ProfileUpdate
+from schemas.profile import (
+    ProfileCreate,
+    ProfileResponse,
+    ProfileUpdate,
+)
 
 
 router = APIRouter(
@@ -22,11 +27,15 @@ router = APIRouter(
 def create_profile(
     profile_data: ProfileCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     existing_profile = (
         db.query(Profile)
-        .filter(Profile.user_id == current_user.id)
+        .filter(
+            Profile.user_id == current_user.id
+        )
         .first()
     )
 
@@ -54,11 +63,15 @@ def create_profile(
 )
 def get_my_profile(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     profile = (
         db.query(Profile)
-        .filter(Profile.user_id == current_user.id)
+        .filter(
+            Profile.user_id == current_user.id
+        )
         .first()
     )
 
@@ -78,11 +91,15 @@ def get_my_profile(
 def update_my_profile(
     profile_data: ProfileUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     profile = (
         db.query(Profile)
-        .filter(Profile.user_id == current_user.id)
+        .filter(
+            Profile.user_id == current_user.id
+        )
         .first()
     )
 
@@ -92,7 +109,9 @@ def update_my_profile(
             detail="Profile not found",
         )
 
-    update_data = profile_data.model_dump(exclude_unset=True)
+    update_data = profile_data.model_dump(
+        exclude_unset=True
+    )
 
     for field, value in update_data.items():
         setattr(profile, field, value)

@@ -4,15 +4,17 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from dependencies import get_db
-from dependencies.auth import get_current_user
+from dependencies.roles import require_role
 from models.job import Job
 from models.saved_job import SavedJob
 from models.user import User
 from schemas.saved_job import SavedJobResponse
 
+
 router = APIRouter(
     prefix="/saved-jobs",
     tags=["Saved Jobs"],
+    dependencies=[Depends(require_role("CANDIDATE"))],
 )
 
 
@@ -24,9 +26,11 @@ router = APIRouter(
 def save_job(
     job_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
-    # Check that the job exists
+    # Check that the job exists.
     job = (
         db.query(Job)
         .filter(Job.id == job_id)
@@ -39,11 +43,12 @@ def save_job(
             detail="Job not found",
         )
 
-    # Check if already saved
+    # Check if already saved.
     existing = (
         db.query(SavedJob)
         .filter(
-            SavedJob.user_id == current_user.id,
+            SavedJob.user_id
+            == current_user.id,
             SavedJob.job_id == job_id,
         )
         .first()
@@ -73,12 +78,19 @@ def save_job(
 )
 def get_saved_jobs(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     return (
         db.query(SavedJob)
-        .filter(SavedJob.user_id == current_user.id)
-        .order_by(SavedJob.created_at.desc())
+        .filter(
+            SavedJob.user_id
+            == current_user.id
+        )
+        .order_by(
+            SavedJob.created_at.desc()
+        )
         .all()
     )
 
@@ -90,12 +102,15 @@ def get_saved_jobs(
 def unsave_job(
     job_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     saved_job = (
         db.query(SavedJob)
         .filter(
-            SavedJob.user_id == current_user.id,
+            SavedJob.user_id
+            == current_user.id,
             SavedJob.job_id == job_id,
         )
         .first()

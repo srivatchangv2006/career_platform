@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from dependencies import get_db
 from dependencies.auth import get_current_user
+from dependencies.roles import require_role
 from models.job import Job
 from models.job_skill import JobSkill
 from models.skill import Skill
@@ -18,6 +19,7 @@ from services.skill_gap_analyzer import analyze_skill_gap
 router = APIRouter(
     prefix="/jobs",
     tags=["Skill Gap Analysis"],
+    dependencies=[Depends(require_role("CANDIDATE"))],
 )
 
 

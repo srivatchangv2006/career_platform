@@ -3,12 +3,12 @@ from sqlalchemy.orm import Session
 
 from auth import authenticate_user, create_access_token
 from dependencies import get_db
+from dependencies.auth import get_current_user
+from dependencies.roles import require_role
 from models.user import User
 from schemas.auth import LoginRequest, TokenResponse
 from schemas.user import UserCreate, UserResponse
 from security import hash_password
-from dependencies.auth import get_current_user
-from dependencies.roles import require_role
 
 
 router = APIRouter(
@@ -26,9 +26,15 @@ def register_user(
     user_data: UserCreate,
     db: Session = Depends(get_db),
 ):
-    existing_user = db.query(User).filter(
-        User.email == user_data.email
-    ).first()
+    # -----------------------------------------------
+    # Check whether the email already exists
+    # -----------------------------------------------
+
+    existing_user = (
+        db.query(User)
+        .filter(User.email == user_data.email)
+        .first()
+    )
 
     if existing_user:
         raise HTTPException(
@@ -36,9 +42,23 @@ def register_user(
             detail="Email already registered",
         )
 
+    # -----------------------------------------------
+    # Create user with requested registration role
+    #
+    # UserCreate only permits:
+    # CANDIDATE
+    # RECRUITER
+    #
+    # ADMIN can never be created through this
+    # public registration endpoint.
+    # -----------------------------------------------
+
     new_user = User(
         email=user_data.email,
-        password_hash=hash_password(user_data.password),
+        password_hash=hash_password(
+            user_data.password
+        ),
+        role=user_data.role.value,
     )
 
     db.add(new_user)
@@ -48,8 +68,9 @@ def register_user(
     return {
         "id": str(new_user.id),
         "email": new_user.email,
-        "role": new_user.role,
-        "status": new_user.status,
+        "role": new_user.role.value
+        if hasattr(new_user.role, "value")
+        else str(new_user.role),
     }
 
 
@@ -61,9 +82,11 @@ def login_user(
     login_data: LoginRequest,
     db: Session = Depends(get_db),
 ):
-    user = db.query(User).filter(
-        User.email == login_data.email
-    ).first()
+    user = (
+        db.query(User)
+        .filter(User.email == login_data.email)
+        .first()
+    )
 
     authenticated_user = authenticate_user(
         user,
@@ -85,16 +108,26 @@ def login_user(
         "token_type": "bearer",
     }
 
+
 @router.get("/me")
 def get_my_profile(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        get_current_user
+    ),
 ):
+    role = (
+        current_user.role.value
+        if hasattr(current_user.role, "value")
+        else str(current_user.role)
+    )
+
     return {
         "id": str(current_user.id),
         "email": current_user.email,
-        "role": current_user.role,
+        "role": role,
         "status": current_user.status,
     }
+
 
 @router.get("/candidate-only")
 def candidate_only(
@@ -105,5 +138,12 @@ def candidate_only(
     return {
         "message": "Candidate access granted",
         "user_id": str(current_user.id),
-        "role": current_user.role,
+        "role": (
+            current_user.role.value
+            if hasattr(
+                current_user.role,
+                "value",
+            )
+            else str(current_user.role)
+        ),
     }

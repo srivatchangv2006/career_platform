@@ -5,9 +5,12 @@ from sqlalchemy.orm import Session
 
 from dependencies import get_db
 from dependencies.auth import get_current_user
+from dependencies.roles import require_role
+
 from models.skill import Skill
 from models.user import User
 from models.user_skill import UserSkill
+
 from schemas.skill import (
     SkillCreate,
     SkillResponse,
@@ -16,15 +19,17 @@ from schemas.skill import (
     UserSkillUpdate,
 )
 
+
 router = APIRouter(
     prefix="/skills",
     tags=["Skills"],
+    dependencies=[Depends(require_role("CANDIDATE"))],
 )
 
 
-# --------------------------------------------------
-# Skills
-# --------------------------------------------------
+# ==================================================
+# Global Skills
+# ==================================================
 
 @router.post(
     "",
@@ -34,11 +39,15 @@ router = APIRouter(
 def create_skill(
     skill_data: SkillCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     existing_skill = (
         db.query(Skill)
-        .filter(Skill.slug == skill_data.slug)
+        .filter(
+            Skill.slug == skill_data.slug
+        )
         .first()
     )
 
@@ -48,7 +57,9 @@ def create_skill(
             detail="Skill already exists",
         )
 
-    skill = Skill(**skill_data.model_dump())
+    skill = Skill(
+        **skill_data.model_dump()
+    )
 
     db.add(skill)
     db.commit()
@@ -63,14 +74,22 @@ def create_skill(
 )
 def get_skills(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        get_current_user
+    ),
 ):
-    return db.query(Skill).order_by(Skill.name.asc()).all()
+    return (
+        db.query(Skill)
+        .order_by(
+            Skill.name.asc()
+        )
+        .all()
+    )
 
 
-# --------------------------------------------------
-# User Skills
-# --------------------------------------------------
+# ==================================================
+# Candidate-owned User Skills
+# ==================================================
 
 @router.post(
     "/me",
@@ -80,11 +99,15 @@ def get_skills(
 def add_my_skill(
     skill_data: UserSkillCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     skill = (
         db.query(Skill)
-        .filter(Skill.id == skill_data.skill_id)
+        .filter(
+            Skill.id == skill_data.skill_id
+        )
         .first()
     )
 
@@ -97,8 +120,10 @@ def add_my_skill(
     existing_user_skill = (
         db.query(UserSkill)
         .filter(
-            UserSkill.user_id == current_user.id,
-            UserSkill.skill_id == skill_data.skill_id,
+            UserSkill.user_id
+            == current_user.id,
+            UserSkill.skill_id
+            == skill_data.skill_id,
         )
         .first()
     )
@@ -127,12 +152,19 @@ def add_my_skill(
 )
 def get_my_skills(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     return (
         db.query(UserSkill)
-        .filter(UserSkill.user_id == current_user.id)
-        .order_by(UserSkill.created_at.desc())
+        .filter(
+            UserSkill.user_id
+            == current_user.id
+        )
+        .order_by(
+            UserSkill.created_at.desc()
+        )
         .all()
     )
 
@@ -145,13 +177,17 @@ def update_my_skill(
     skill_id: UUID,
     skill_data: UserSkillUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     user_skill = (
         db.query(UserSkill)
         .filter(
-            UserSkill.user_id == current_user.id,
-            UserSkill.skill_id == skill_id,
+            UserSkill.user_id
+            == current_user.id,
+            UserSkill.skill_id
+            == skill_id,
         )
         .first()
     )
@@ -162,10 +198,16 @@ def update_my_skill(
             detail="Skill not found in your profile",
         )
 
-    update_data = skill_data.model_dump(exclude_unset=True)
+    update_data = skill_data.model_dump(
+        exclude_unset=True
+    )
 
     for field, value in update_data.items():
-        setattr(user_skill, field, value)
+        setattr(
+            user_skill,
+            field,
+            value,
+        )
 
     db.commit()
     db.refresh(user_skill)
@@ -180,13 +222,17 @@ def update_my_skill(
 def delete_my_skill(
     skill_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("CANDIDATE")
+    ),
 ):
     user_skill = (
         db.query(UserSkill)
         .filter(
-            UserSkill.user_id == current_user.id,
-            UserSkill.skill_id == skill_id,
+            UserSkill.user_id
+            == current_user.id,
+            UserSkill.skill_id
+            == skill_id,
         )
         .first()
     )

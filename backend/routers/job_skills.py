@@ -5,21 +5,29 @@ from sqlalchemy.orm import Session
 
 from dependencies import get_db
 from dependencies.auth import get_current_user
+from dependencies.roles import require_role
+
 from models.job import Job
 from models.job_skill import JobSkill
 from models.skill import Skill
 from models.user import User
+
 from schemas.job_skill import (
     JobSkillCreate,
     JobSkillResponse,
     JobSkillUpdate,
 )
 
+
 router = APIRouter(
     prefix="/jobs",
     tags=["Job Skills"],
 )
 
+
+# ==================================================
+# Recruiter/Admin: Add Skill to Own Job
+# ==================================================
 
 @router.post(
     "/{job_id}/skills",
@@ -30,9 +38,10 @@ def add_job_skill(
     job_id: UUID,
     skill_data: JobSkillCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("RECRUITER", "ADMIN")
+    ),
 ):
-    # Make sure the job exists and belongs to the current user
     job = (
         db.query(Job)
         .filter(
@@ -48,10 +57,11 @@ def add_job_skill(
             detail="Job not found",
         )
 
-    # Make sure the skill exists
     skill = (
         db.query(Skill)
-        .filter(Skill.id == skill_data.skill_id)
+        .filter(
+            Skill.id == skill_data.skill_id
+        )
         .first()
     )
 
@@ -61,12 +71,12 @@ def add_job_skill(
             detail="Skill not found",
         )
 
-    # Prevent duplicate job-skill relationships
     existing_job_skill = (
         db.query(JobSkill)
         .filter(
             JobSkill.job_id == job_id,
-            JobSkill.skill_id == skill_data.skill_id,
+            JobSkill.skill_id
+            == skill_data.skill_id,
         )
         .first()
     )
@@ -89,6 +99,10 @@ def add_job_skill(
     return job_skill
 
 
+# ==================================================
+# Shared: View Job Skills
+# ==================================================
+
 @router.get(
     "/{job_id}/skills",
     response_model=list[JobSkillResponse],
@@ -96,11 +110,15 @@ def add_job_skill(
 def get_job_skills(
     job_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        get_current_user
+    ),
 ):
     job = (
         db.query(Job)
-        .filter(Job.id == job_id)
+        .filter(
+            Job.id == job_id
+        )
         .first()
     )
 
@@ -112,11 +130,19 @@ def get_job_skills(
 
     return (
         db.query(JobSkill)
-        .filter(JobSkill.job_id == job_id)
-        .order_by(JobSkill.created_at.asc())
+        .filter(
+            JobSkill.job_id == job_id
+        )
+        .order_by(
+            JobSkill.created_at.asc()
+        )
         .all()
     )
 
+
+# ==================================================
+# Recruiter/Admin: Update Skill on Own Job
+# ==================================================
 
 @router.put(
     "/{job_id}/skills/{skill_id}",
@@ -127,7 +153,9 @@ def update_job_skill(
     skill_id: UUID,
     skill_data: JobSkillUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("RECRUITER", "ADMIN")
+    ),
 ):
     job = (
         db.query(Job)
@@ -159,16 +187,26 @@ def update_job_skill(
             detail="Job skill not found",
         )
 
-    update_data = skill_data.model_dump(exclude_unset=True)
+    update_data = skill_data.model_dump(
+        exclude_unset=True
+    )
 
     for field, value in update_data.items():
-        setattr(job_skill, field, value)
+        setattr(
+            job_skill,
+            field,
+            value,
+        )
 
     db.commit()
     db.refresh(job_skill)
 
     return job_skill
 
+
+# ==================================================
+# Recruiter/Admin: Delete Skill from Own Job
+# ==================================================
 
 @router.delete(
     "/{job_id}/skills/{skill_id}",
@@ -178,7 +216,9 @@ def delete_job_skill(
     job_id: UUID,
     skill_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("RECRUITER", "ADMIN")
+    ),
 ):
     job = (
         db.query(Job)

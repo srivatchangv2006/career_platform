@@ -5,15 +5,27 @@ from sqlalchemy.orm import Session
 
 from dependencies import get_db
 from dependencies.auth import get_current_user
+from dependencies.roles import require_role
+
 from models.job import Job
 from models.user import User
-from schemas.job import JobCreate, JobResponse, JobUpdate
+
+from schemas.job import (
+    JobCreate,
+    JobResponse,
+    JobUpdate,
+)
+
 
 router = APIRouter(
     prefix="/jobs",
     tags=["Jobs"],
 )
 
+
+# ==================================================
+# Recruiter/Admin: Create Job
+# ==================================================
 
 @router.post(
     "",
@@ -23,7 +35,9 @@ router = APIRouter(
 def create_job(
     job_data: JobCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("RECRUITER", "ADMIN")
+    ),
 ):
     job = Job(
         posted_by=current_user.id,
@@ -37,20 +51,32 @@ def create_job(
     return job
 
 
+# ==================================================
+# Shared: Browse Jobs
+# ==================================================
+
 @router.get(
     "",
     response_model=list[JobResponse],
 )
 def get_jobs(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        get_current_user
+    ),
 ):
     return (
         db.query(Job)
-        .order_by(Job.created_at.desc())
+        .order_by(
+            Job.created_at.desc()
+        )
         .all()
     )
 
+
+# ==================================================
+# Shared: Get Job
+# ==================================================
 
 @router.get(
     "/{job_id}",
@@ -59,11 +85,15 @@ def get_jobs(
 def get_job(
     job_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        get_current_user
+    ),
 ):
     job = (
         db.query(Job)
-        .filter(Job.id == job_id)
+        .filter(
+            Job.id == job_id
+        )
         .first()
     )
 
@@ -76,6 +106,10 @@ def get_job(
     return job
 
 
+# ==================================================
+# Recruiter/Admin: Update Own Job
+# ==================================================
+
 @router.put(
     "/{job_id}",
     response_model=JobResponse,
@@ -84,7 +118,9 @@ def update_job(
     job_id: UUID,
     job_data: JobUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_role("RECRUITER", "ADMIN")
+    ),
 ):
     job = (
         db.query(Job)
@@ -101,10 +137,16 @@ def update_job(
             detail="Job not found",
         )
 
-    update_data = job_data.model_dump(exclude_unset=True)
+    update_data = job_data.model_dump(
+        exclude_unset=True
+    )
 
     for field, value in update_data.items():
-        setattr(job, field, value)
+        setattr(
+            job,
+            field,
+            value,
+        )
 
     db.commit()
     db.refresh(job)

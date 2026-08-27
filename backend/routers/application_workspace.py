@@ -7,6 +7,7 @@ from dependencies import get_db
 from dependencies.auth import get_current_user
 
 from models.application import Application
+from dependencies.roles import require_role
 from models.interview import Interview
 from models.interview_preparation import InterviewPreparation
 from models.job import Job
@@ -24,12 +25,13 @@ from schemas.application_workspace import (
     WorkspaceSkillGap,
 )
 
-
 router = APIRouter(
     prefix="/applications",
     tags=["Application Workspace"],
+    dependencies=[
+        Depends(require_role("CANDIDATE"))
+    ],
 )
-
 
 @router.get(
     "/{application_id}/workspace",

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from dependencies import get_db
 from dependencies.auth import get_current_user
+from dependencies.roles import require_role
 from models.resume import Resume
 from models.user import User
 from schemas.resume import ResumeResponse
@@ -25,6 +26,7 @@ from services.azure_blob import (
 router = APIRouter(
     prefix="/resumes",
     tags=["Resumes"],
+    dependencies=[Depends(require_role("CANDIDATE"))],
 )
 
 
