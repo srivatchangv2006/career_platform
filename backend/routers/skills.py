@@ -23,7 +23,7 @@ from schemas.skill import (
 router = APIRouter(
     prefix="/skills",
     tags=["Skills"],
-    dependencies=[Depends(require_role("CANDIDATE"))],
+    dependencies=[Depends(get_current_user)],
 )
 
 
@@ -35,6 +35,7 @@ router = APIRouter(
     "",
     response_model=SkillResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_role("CANDIDATE"))],
 )
 def create_skill(
     skill_data: SkillCreate,
@@ -95,6 +96,7 @@ def get_skills(
     "/me",
     response_model=UserSkillResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_role("CANDIDATE"))],
 )
 def add_my_skill(
     skill_data: UserSkillCreate,
@@ -149,6 +151,7 @@ def add_my_skill(
 @router.get(
     "/me",
     response_model=list[UserSkillResponse],
+    dependencies=[Depends(require_role("CANDIDATE"))],
 )
 def get_my_skills(
     db: Session = Depends(get_db),
@@ -172,6 +175,7 @@ def get_my_skills(
 @router.put(
     "/me/{skill_id}",
     response_model=UserSkillResponse,
+    dependencies=[Depends(require_role("CANDIDATE"))],
 )
 def update_my_skill(
     skill_id: UUID,
@@ -218,6 +222,7 @@ def update_my_skill(
 @router.delete(
     "/me/{skill_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_role("CANDIDATE"))],
 )
 def delete_my_skill(
     skill_id: UUID,

@@ -46,13 +46,23 @@ class ReferralOpportunity(Base):
         nullable=False,
     )
 
-    job_id: Mapped[uuid.UUID] = mapped_column(
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey(
             "jobs.id",
             ondelete="CASCADE",
         ),
-        nullable=False,
+        nullable=True,
+    )
+
+    opportunity_title: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    opportunity_company: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
     )
 
     message: Mapped[str | None] = mapped_column(

@@ -3,6 +3,8 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from schemas.network import NetworkUserResponse
+
 
 class ConnectionCreate(BaseModel):
     receiver_id: UUID
@@ -19,3 +21,6 @@ class ConnectionResponse(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+
+    requester: NetworkUserResponse | None = None
+    receiver: NetworkUserResponse | None = None

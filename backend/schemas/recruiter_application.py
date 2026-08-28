@@ -15,6 +15,7 @@ class RecruiterCandidateProfile(BaseModel):
 
 class RecruiterCandidateSkill(BaseModel):
     skill_id: UUID
+    skill_name: str
     proficiency: str | None
     years_experience: float | None
 
@@ -40,6 +41,7 @@ class RecruiterApplicationDetails(BaseModel):
 class RecruiterJobSummary(BaseModel):
     id: UUID
     company_id: UUID
+    company_name: str | None
     title: str
     description: str
     location: str | None
@@ -65,10 +67,13 @@ class RecruiterApplicationDetailResponse(BaseModel):
     job: RecruiterJobSummary
     resume: RecruiterResumeSummary | None
 
+
 class RecruiterResumeDownloadResponse(BaseModel):
     resume_id: UUID
     file_name: str
     content_type: str | None
+
+
 class RecruiterApplicationAnswer(BaseModel):
     id: UUID
     question_id: UUID

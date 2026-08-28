@@ -1,4 +1,6 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 from routers.profiles import router as profiles_router
 from routers.users import router as users_router
 from routers.education import router as education_router
@@ -35,11 +37,6 @@ from routers.job_recommendations import (
 )
 from routers.agent_tasks import router as agent_tasks_router
 from routers.resume_analysis import router as resume_analysis_router
-app = FastAPI(
-    title="Career Platform API",
-    description="Backend API for the Career Platform",
-    version="1.0.0",
-)
 from routers.agent_task_steps import (
     router as agent_task_steps_router,
 )
@@ -88,28 +85,69 @@ from routers.recruiter_profiles import (
     router as recruiter_profiles_router,
 )
 from routers.messages import router as messages_router
+
+
+app = FastAPI(
+    title="Career Platform API",
+    description="Backend API for the Career Platform",
+    version="1.0.0",
+)
+
+
+# ============================================================
+# CORS
+#
+# Allows the React/Vite frontend running locally to communicate
+# with the FastAPI backend.
+# ============================================================
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ============================================================
+# ROUTERS
+# ============================================================
+
 app.include_router(interview_preparation_router)
 app.include_router(agent_feedback_router)
 app.include_router(agent_task_steps_router)
 app.include_router(agent_messages_router)
+
 app.include_router(users_router)
 app.include_router(messages_router)
+
 app.include_router(recruiter_profiles_router)
+
 app.include_router(community_votes_router)
 app.include_router(community_comments_router)
 app.include_router(community_posts_router)
+
 app.include_router(referral_requests_router)
 app.include_router(referral_opportunities_router)
+
 app.include_router(user_follows_router)
 app.include_router(connections_router)
+
 app.include_router(recruiter_dashboard_router)
 app.include_router(recruiter_interviews_router)
 app.include_router(recruiter_applications_router)
+
 app.include_router(application_ai_activity_router)
 app.include_router(application_timeline_router)
 app.include_router(application_workspace_router)
+
 app.include_router(interviews_router)
 app.include_router(career_goals_router)
+
 app.include_router(profiles_router)
 app.include_router(education_router)
 app.include_router(experience_router)
@@ -119,28 +157,29 @@ app.include_router(jobs_router)
 app.include_router(job_skills_router)
 app.include_router(job_preferences_router)
 app.include_router(saved_jobs_router)
+
 app.include_router(applications_router)
 app.include_router(application_status_history_router)
 app.include_router(application_answers_router)
 app.include_router(job_screening_questions_router)
+
 app.include_router(resumes_router)
 app.include_router(resume_analysis_router)
 app.include_router(skill_gap_analysis_router)
 app.include_router(job_recommendations_router)
+
 app.include_router(agent_tasks_router)
 app.include_router(agent_memory_router)
 app.include_router(ai_interactions_router)
+
+
+# ============================================================
+# ROOT
+# ============================================================
 
 @app.get("/")
 def root():
     return {
         "message": "Career Platform API is running",
         "status": "success",
-    }
-
-
-@app.get("/health")
-def health_check():
-    return {
-        "status": "healthy",
     }

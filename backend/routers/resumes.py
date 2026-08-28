@@ -4,6 +4,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     HTTPException,
     UploadFile,
     status,
@@ -16,6 +17,9 @@ from dependencies.roles import require_role
 from models.resume import Resume
 from models.user import User
 from schemas.resume import ResumeResponse
+from services.agents import run_resume_agent
+from services.ai_status import classify_ai_error
+
 from services.azure_blob import (
     AZURE_STORAGE_CONTAINER_NAME,
     blob_service_client,
@@ -37,6 +41,7 @@ router = APIRouter(
 )
 async def upload_user_resume(
     file: UploadFile = File(...),
+    resume_name: str | None = Form(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -54,6 +59,34 @@ async def upload_user_resume(
             detail="Resume file is empty",
         )
 
+    existing_resumes = (
+        db.query(Resume)
+        .filter(
+            Resume.user_id == current_user.id
+        )
+        .all()
+    )
+
+    # The first resume is automatically the default.
+    # If the user has resumes but somehow no default,
+    # make this upload the default as well.
+    has_primary = any(
+        resume.is_primary
+        for resume in existing_resumes
+    )
+
+    is_primary = (
+        len(existing_resumes) == 0
+        or not has_primary
+    )
+
+    display_name = (
+        resume_name.strip()
+        if resume_name
+        and resume_name.strip()
+        else (file.filename or "resume.pdf")
+    )
+
     blob_path = upload_resume(
         file_bytes=file_bytes,
         original_filename=file.filename or "resume.pdf",
@@ -63,19 +96,60 @@ async def upload_user_resume(
 
     resume = Resume(
         user_id=current_user.id,
-        file_name=file.filename or "resume.pdf",
+        file_name=display_name,
         blob_container=AZURE_STORAGE_CONTAINER_NAME,
         blob_path=blob_path,
         content_type=file.content_type,
         file_size_bytes=len(file_bytes),
-        is_primary=False,
+        is_primary=is_primary,
     )
 
     db.add(resume)
     db.commit()
     db.refresh(resume)
 
-    return resume
+    # --------------------------------------------------------
+    # Automatically run Resume Agent
+    #
+    # The resume is already safely persisted before the agent
+    # runs, so an AI failure does not invalidate the upload.
+    # --------------------------------------------------------
+
+    ai_analysis_status = "COMPLETED"
+
+    try:
+        run_resume_agent(
+            db=db,
+            user_id=current_user.id,
+            resume_id=resume.id,
+        )
+    except Exception as exc:
+        import traceback
+
+        db.rollback()
+
+        ai_analysis_status = classify_ai_error(
+            exc
+        )
+
+        print(
+            "RESUME AGENT FAILED:",
+            type(exc).__name__,
+            str(exc),
+        )
+        traceback.print_exc()
+
+    db.refresh(resume)
+
+    response_data = ResumeResponse.model_validate(
+        resume
+    )
+
+    response_data.ai_analysis_status = (
+        ai_analysis_status
+    )
+
+    return response_data
 
 
 @router.get(

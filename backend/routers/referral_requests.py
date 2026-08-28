@@ -1,19 +1,24 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
+from io import BytesIO
+
+from fastapi.responses import StreamingResponse
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from dependencies import get_db
 from dependencies.auth import get_current_user
 
+from models.resume import Resume
+from services.azure_blob_download import download_blob
 from models.referral import (
     Referral,
     ReferralOpportunity,
     ReferralOpportunityStatus,
     ReferralStatus,
 )
-from models.resume import Resume
+from models.profile import Profile
 from models.user import User
 
 from schemas.referral import (
@@ -27,6 +32,75 @@ router = APIRouter(
     prefix="/referral-requests",
     tags=["Referral Requests"],
 )
+
+
+def build_referral_response(
+    db: Session,
+    referral: Referral,
+):
+    requester = (
+        db.query(User)
+        .filter(
+            User.id
+            == referral.requester_id
+        )
+        .first()
+    )
+
+    resume = None
+
+    if referral.resume_id:
+        resume = (
+            db.query(Resume)
+            .filter(
+                Resume.id
+                == referral.resume_id
+            )
+            .first()
+        )
+
+    requester_name = (
+        requester.email
+        if requester
+        else "User"
+    )
+
+    if requester:
+        profile = (
+            db.query(Profile)
+            .filter(
+                Profile.user_id
+                == requester.id
+            )
+            .first()
+        )
+
+        if profile and profile.full_name:
+            requester_name = (
+                profile.full_name
+            )
+
+    return ReferralResponse(
+        id=referral.id,
+        opportunity_id=(
+            referral.opportunity_id
+        ),
+        requester_id=(
+            referral.requester_id
+        ),
+        requester_name=requester_name,
+        resume_id=referral.resume_id,
+        resume_name=(
+            resume.file_name
+            if resume
+            else None
+        ),
+        message=referral.message,
+        status=referral.status,
+        created_at=referral.created_at,
+        updated_at=referral.updated_at,
+    )
+
 
 
 @router.post(
@@ -118,7 +192,10 @@ def create_referral_request(
     db.commit()
     db.refresh(referral)
 
-    return referral
+    return build_referral_response(
+        db,
+        referral,
+    )
 
 
 @router.get(
@@ -129,16 +206,25 @@ def get_sent_referral_requests(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return (
+    referrals = (
         db.query(Referral)
         .filter(
-            Referral.requester_id == current_user.id
+            Referral.requester_id
+            == current_user.id
         )
         .order_by(
             Referral.created_at.desc()
         )
         .all()
     )
+
+    return [
+        build_referral_response(
+            db,
+            referral,
+        )
+        for referral in referrals
+    ]
 
 
 @router.get(
@@ -149,7 +235,7 @@ def get_received_referral_requests(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return (
+    referrals = (
         db.query(Referral)
         .join(
             ReferralOpportunity,
@@ -165,6 +251,14 @@ def get_received_referral_requests(
         )
         .all()
     )
+
+    return [
+        build_referral_response(
+            db,
+            referral,
+        )
+        for referral in referrals
+    ]
 
 
 @router.get(
@@ -211,7 +305,10 @@ def get_referral_request(
             detail="You do not have access to this referral request",
         )
 
-    return referral
+    return build_referral_response(
+        db,
+        referral,
+    )
 
 
 @router.put(
@@ -299,9 +396,9 @@ def update_referral_request(
             )
 
             if (
-                opportunity.max_requests is not None
+                opportunity.max_referrals is not None
                 and accepted_count
-                >= opportunity.max_requests
+                >= opportunity.max_referrals
             ):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
@@ -314,10 +411,10 @@ def update_referral_request(
             referral.status = ReferralStatus.ACCEPTED
 
             if (
-                opportunity.max_requests is not None
+                opportunity.max_referrals is not None
                 and (
                     accepted_count + 1
-                    >= opportunity.max_requests
+                    >= opportunity.max_referrals
                 )
             ):
                 opportunity.status = (
@@ -343,7 +440,10 @@ def update_referral_request(
     db.commit()
     db.refresh(referral)
 
-    return referral
+    return build_referral_response(
+        db,
+        referral,
+    )
 
 
 @router.delete(
@@ -404,4 +504,86 @@ def opportunity_owned_by_user(
         )
         .first()
         is not None
+    )
+
+
+# ============================================================
+# VIEW / DOWNLOAD REFERRAL RESUME
+#
+# Only the owner of the referral opportunity can access the
+# candidate's attached resume.
+# ============================================================
+
+@router.get(
+    "/{referral_id}/resume",
+)
+def download_referral_resume(
+    referral_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    referral = (
+        db.query(Referral)
+        .join(
+            ReferralOpportunity,
+            ReferralOpportunity.id
+            == Referral.opportunity_id,
+        )
+        .filter(
+            Referral.id == referral_id,
+            ReferralOpportunity.posted_by
+            == current_user.id,
+        )
+        .first()
+    )
+
+    if not referral:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Referral request not found",
+        )
+
+    if not referral.resume_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No resume attached to this referral request",
+        )
+
+    resume = (
+        db.query(Resume)
+        .filter(
+            Resume.id == referral.resume_id,
+            Resume.user_id == referral.requester_id,
+        )
+        .first()
+    )
+
+    if not resume:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Resume not found",
+        )
+
+    try:
+        file_bytes = download_blob(
+            container_name=resume.blob_container,
+            blob_path=resume.blob_path,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to download resume",
+        ) from exc
+
+    return StreamingResponse(
+        BytesIO(file_bytes),
+        media_type=(
+            resume.content_type
+            or "application/pdf"
+        ),
+        headers={
+            "Content-Disposition": (
+                f'inline; filename="{resume.file_name}"'
+            ),
+        },
     )

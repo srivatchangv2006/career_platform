@@ -1,20 +1,33 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    status,
+)
 from sqlalchemy import or_
+from sqlalchemy.orm import Session
 
 from dependencies import get_db
 from dependencies.auth import get_current_user
-from models.connections import Connection, ConnectionStatus
-from models.connections import Connection
+
+from models.connections import (
+    Connection,
+    ConnectionStatus,
+)
 from models.user import User
 
 from schemas.connection import (
     ConnectionCreate,
     ConnectionResponse,
     ConnectionUpdate,
+)
+
+from services.public_user import (
+    get_public_user,
 )
 
 
@@ -24,15 +37,61 @@ router = APIRouter(
 )
 
 
-ALLOWED_UPDATE_STATUSES = {
-    "ACCEPTED",
-    "REJECTED",
-}
+def build_connection_response(
+    db: Session,
+    connection: Connection,
+) -> ConnectionResponse:
+    connection_status = (
+        connection.status.value
+        if hasattr(
+            connection.status,
+            "value",
+        )
+        else str(connection.status)
+    )
+
+    return ConnectionResponse(
+        id=connection.id,
+        requester_id=connection.requester_id,
+        receiver_id=connection.receiver_id,
+        status=connection_status,
+        created_at=connection.created_at,
+        updated_at=connection.updated_at,
+        requester=get_public_user(
+            db,
+            connection.requester_id,
+        ),
+        receiver=get_public_user(
+            db,
+            connection.receiver_id,
+        ),
+    )
 
 
-# ============================================================
-# CREATE CONNECTION REQUEST
-# ============================================================
+def user_matches_search(
+    user_data,
+    search: str | None,
+) -> bool:
+    if not search:
+        return True
+
+    search_value = (
+        search.strip().lower()
+    )
+
+    searchable = " ".join(
+        [
+            user_data["display_name"],
+            user_data["handle"],
+            user_data["role"],
+            user_data["headline"] or "",
+            user_data["location"] or "",
+            user_data["company_name"] or "",
+        ]
+    ).lower()
+
+    return search_value in searchable
+
 
 @router.post(
     "",
@@ -44,26 +103,23 @@ def create_connection(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    receiver_id = connection_data.receiver_id
-
-    # --------------------------------------------------------
-    # Cannot connect to yourself.
-    # --------------------------------------------------------
+    receiver_id = (
+        connection_data.receiver_id
+    )
 
     if receiver_id == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You cannot send a connection request to yourself",
+            detail=(
+                "You cannot send a connection "
+                "request to yourself"
+            ),
         )
-
-    # --------------------------------------------------------
-    # Receiver must exist.
-    # --------------------------------------------------------
 
     receiver = (
         db.query(User)
         .filter(
-            User.id == receiver_id
+            User.id == receiver_id,
         )
         .first()
     )
@@ -74,21 +130,25 @@ def create_connection(
             detail="User not found",
         )
 
-    # --------------------------------------------------------
-    # Prevent duplicate connection in either direction.
-    # --------------------------------------------------------
-
     existing = (
         db.query(Connection)
         .filter(
             or_(
                 (
-                    (Connection.requester_id == current_user.id)
-                    & (Connection.receiver_id == receiver_id)
+                    Connection.requester_id
+                    == current_user.id
+                )
+                & (
+                    Connection.receiver_id
+                    == receiver_id
                 ),
                 (
-                    (Connection.requester_id == receiver_id)
-                    & (Connection.receiver_id == current_user.id)
+                    Connection.requester_id
+                    == receiver_id
+                )
+                & (
+                    Connection.receiver_id
+                    == current_user.id
                 ),
             )
         )
@@ -98,12 +158,11 @@ def create_connection(
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A connection already exists between these users",
+            detail=(
+                "A connection already exists "
+                "between these users"
+            ),
         )
-
-    # --------------------------------------------------------
-    # Create pending request.
-    # --------------------------------------------------------
 
     connection = Connection(
         requester_id=current_user.id,
@@ -115,28 +174,35 @@ def create_connection(
     db.commit()
     db.refresh(connection)
 
-    return connection
+    return build_connection_response(
+        db,
+        connection,
+    )
 
-
-# ============================================================
-# GET MY CONNECTIONS
-# ============================================================
 
 @router.get(
     "/me",
     response_model=list[ConnectionResponse],
 )
 def get_my_connections(
+    q: str | None = Query(
+        default=None,
+        min_length=2,
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return (
+    connections = (
         db.query(Connection)
         .filter(
             or_(
-                Connection.requester_id == current_user.id,
-                Connection.receiver_id == current_user.id,
-            )
+                Connection.requester_id
+                == current_user.id,
+                Connection.receiver_id
+                == current_user.id,
+            ),
+            Connection.status
+            == ConnectionStatus.ACCEPTED,
         )
         .order_by(
             Connection.updated_at.desc()
@@ -144,24 +210,78 @@ def get_my_connections(
         .all()
     )
 
+    results = []
 
-# ============================================================
-# GET INCOMING CONNECTION REQUESTS
-# ============================================================
+    for connection in connections:
+        requester = get_public_user(
+            db,
+            connection.requester_id,
+        )
+
+        receiver = get_public_user(
+            db,
+            connection.receiver_id,
+        )
+
+        other_user = (
+            receiver
+            if connection.requester_id
+            == current_user.id
+            else requester
+        )
+
+        if not other_user:
+            continue
+
+        if not user_matches_search(
+            other_user,
+            q,
+        ):
+            continue
+
+        results.append(
+            ConnectionResponse(
+                id=connection.id,
+                requester_id=(
+                    connection.requester_id
+                ),
+                receiver_id=(
+                    connection.receiver_id
+                ),
+                status="ACCEPTED",
+                created_at=(
+                    connection.created_at
+                ),
+                updated_at=(
+                    connection.updated_at
+                ),
+                requester=requester,
+                receiver=receiver,
+            )
+        )
+
+    return results
+
 
 @router.get(
     "/requests",
     response_model=list[ConnectionResponse],
 )
 def get_connection_requests(
+    q: str | None = Query(
+        default=None,
+        min_length=2,
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return (
+    requests = (
         db.query(Connection)
         .filter(
-            Connection.receiver_id == current_user.id,
-            Connection.status == ConnectionStatus.PENDING
+            Connection.receiver_id
+            == current_user.id,
+            Connection.status
+            == ConnectionStatus.PENDING,
         )
         .order_by(
             Connection.created_at.desc()
@@ -169,12 +289,51 @@ def get_connection_requests(
         .all()
     )
 
+    results = []
 
-# ============================================================
-# ACCEPT / REJECT CONNECTION REQUEST
-#
-# Only the RECEIVER can accept/reject.
-# ============================================================
+    for connection in requests:
+        requester = get_public_user(
+            db,
+            connection.requester_id,
+        )
+
+        receiver = get_public_user(
+            db,
+            connection.receiver_id,
+        )
+
+        if not requester:
+            continue
+
+        if not user_matches_search(
+            requester,
+            q,
+        ):
+            continue
+
+        results.append(
+            ConnectionResponse(
+                id=connection.id,
+                requester_id=(
+                    connection.requester_id
+                ),
+                receiver_id=(
+                    connection.receiver_id
+                ),
+                status="PENDING",
+                created_at=(
+                    connection.created_at
+                ),
+                updated_at=(
+                    connection.updated_at
+                ),
+                requester=requester,
+                receiver=receiver,
+            )
+        )
+
+    return results
+
 
 @router.put(
     "/{connection_id}",
@@ -189,7 +348,7 @@ def update_connection(
     connection = (
         db.query(Connection)
         .filter(
-            Connection.id == connection_id
+            Connection.id == connection_id,
         )
         .first()
     )
@@ -200,25 +359,38 @@ def update_connection(
             detail="Connection not found",
         )
 
-    # --------------------------------------------------------
-    # Only receiver may accept/reject.
-    # --------------------------------------------------------
-
-    if connection.receiver_id != current_user.id:
+    if (
+        connection.receiver_id
+        != current_user.id
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the receiver can update this connection request",
+            detail=(
+                "Only the receiver can update "
+                "this connection request"
+            ),
         )
 
-    if connection.status != ConnectionStatus.PENDING:
+    if (
+        connection.status
+        != ConnectionStatus.PENDING
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Only pending connection requests can be updated",
+            detail=(
+                "Only pending connection requests "
+                "can be updated"
+            ),
         )
 
-    requested_status = connection_data.status.upper()
+    requested_status = (
+        connection_data.status.upper()
+    )
 
-    if requested_status not in ALLOWED_UPDATE_STATUSES:
+    if requested_status not in {
+        "ACCEPTED",
+        "REJECTED",
+    }:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
@@ -227,7 +399,12 @@ def update_connection(
             ),
         )
 
-    connection.status = ConnectionStatus(requested_status)
+    connection.status = (
+        ConnectionStatus(
+            requested_status
+        )
+    )
+
     connection.updated_at = datetime.now(
         timezone.utc
     )
@@ -235,15 +412,11 @@ def update_connection(
     db.commit()
     db.refresh(connection)
 
-    return connection
+    return build_connection_response(
+        db,
+        connection,
+    )
 
-
-# ============================================================
-# DELETE CONNECTION
-#
-# Either participant may remove an existing connection.
-# Requester may also cancel a pending request.
-# ============================================================
 
 @router.delete(
     "/{connection_id}",
@@ -257,7 +430,7 @@ def delete_connection(
     connection = (
         db.query(Connection)
         .filter(
-            Connection.id == connection_id
+            Connection.id == connection_id,
         )
         .first()
     )
@@ -269,12 +442,16 @@ def delete_connection(
         )
 
     if (
-        connection.requester_id != current_user.id
-        and connection.receiver_id != current_user.id
+        connection.requester_id
+        != current_user.id
+        and connection.receiver_id
+        != current_user.id
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not part of this connection",
+            detail=(
+                "You are not part of this connection"
+            ),
         )
 
     db.delete(connection)

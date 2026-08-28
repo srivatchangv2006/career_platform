@@ -1,6 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
+from models.profile import Profile
+from models.recruiter_profile import RecruiterProfile
+
+from schemas.user_search import UserSearchResult
 from auth import authenticate_user, create_access_token
 from dependencies import get_db
 from dependencies.auth import get_current_user
@@ -184,7 +189,124 @@ def get_my_profile(
         "status": user_status,
     }
 
+@router.get(
+    "/search",
+    response_model=list[UserSearchResult],
+)
+def search_users(
+    q: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        get_current_user
+    ),
+):
+    search_term = q.strip()
 
+    if len(search_term) < 2:
+        return []
+
+    pattern = f"%{search_term}%"
+
+    rows = (
+        db.query(
+            User,
+            Profile,
+            RecruiterProfile,
+        )
+        .outerjoin(
+            Profile,
+            Profile.user_id == User.id,
+        )
+        .outerjoin(
+            RecruiterProfile,
+            RecruiterProfile.user_id == User.id,
+        )
+        .filter(
+            User.id != current_user.id,
+            User.status == "ACTIVE",
+            or_(
+                User.email.ilike(pattern),
+                Profile.full_name.ilike(pattern),
+                Profile.headline.ilike(pattern),
+                RecruiterProfile.designation.ilike(
+                    pattern
+                ),
+            ),
+        )
+        .order_by(
+            User.created_at.desc()
+        )
+        .limit(20)
+        .all()
+    )
+
+    results = []
+
+    for (
+        user,
+        profile,
+        recruiter_profile,
+    ) in rows:
+        role = (
+            user.role.value
+            if hasattr(user.role, "value")
+            else str(user.role)
+        )
+
+        email_prefix = (
+            str(user.email)
+            .split("@")[0]
+            .strip()
+        )
+
+        # Candidate display information
+        if profile:
+            display_name = (
+                profile.full_name
+            )
+
+            headline = (
+                profile.headline
+            )
+
+            location = (
+                profile.location
+            )
+
+            profile_image = (
+                profile.profile_image_blob_path
+            )
+
+        # Recruiter / fallback information
+        elif recruiter_profile:
+            display_name = email_prefix
+
+            headline = (
+                recruiter_profile.designation
+            )
+
+            location = None
+            profile_image = None
+
+        else:
+            display_name = email_prefix
+            headline = None
+            location = None
+            profile_image = None
+
+        results.append(
+            UserSearchResult(
+                id=user.id,
+                display_name=display_name,
+                handle=f"@{email_prefix}",
+                role=role,
+                headline=headline,
+                location=location,
+                profile_image_blob_path=profile_image,
+            )
+        )
+
+    return results
 # ============================================================
 # CANDIDATE-ONLY TEST ENDPOINT
 # ============================================================

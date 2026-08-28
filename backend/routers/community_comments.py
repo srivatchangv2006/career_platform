@@ -9,9 +9,13 @@ from dependencies.auth import get_current_user
 
 from models.community_comments import CommunityComment
 from models.community_posts import CommunityPost
+from models.company import Company
+from models.profile import Profile
+from models.recruiter_profile import RecruiterProfile
 from models.user import User
 
 from schemas.community_comment import (
+    CommunityCommentAuthorResponse,
     CommunityCommentCreate,
     CommunityCommentResponse,
     CommunityCommentUpdate,
@@ -24,9 +28,129 @@ router = APIRouter(
 )
 
 
-# ============================================================
-# CREATE COMMENT / REPLY
-# ============================================================
+def get_comment_or_404(
+    db: Session,
+    comment_id: UUID,
+) -> CommunityComment:
+    comment = (
+        db.query(CommunityComment)
+        .filter(
+            CommunityComment.id == comment_id
+        )
+        .first()
+    )
+
+    if not comment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Community comment not found",
+        )
+
+    return comment
+
+
+def get_comment_author(
+    db: Session,
+    user_id: UUID,
+) -> CommunityCommentAuthorResponse:
+    user = (
+        db.query(User)
+        .filter(User.id == user_id)
+        .first()
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Comment author not found",
+        )
+
+    role = (
+        user.role.value
+        if hasattr(user.role, "value")
+        else str(user.role)
+    )
+
+    profile = (
+        db.query(Profile)
+        .filter(Profile.user_id == user.id)
+        .first()
+    )
+
+    if profile:
+        return CommunityCommentAuthorResponse(
+            user_id=user.id,
+            role=role,
+            display_name=profile.full_name,
+            headline=profile.headline,
+            designation=None,
+            company_name=None,
+            profile_image_blob_path=(
+                profile.profile_image_blob_path
+            ),
+        )
+
+    recruiter_profile = (
+        db.query(RecruiterProfile)
+        .filter(
+            RecruiterProfile.user_id == user.id
+        )
+        .first()
+    )
+
+    if recruiter_profile:
+        company = (
+            db.query(Company)
+            .filter(
+                Company.id
+                == recruiter_profile.company_id
+            )
+            .first()
+        )
+
+        return CommunityCommentAuthorResponse(
+            user_id=user.id,
+            role=role,
+            display_name=user.email,
+            headline=None,
+            designation=(
+                recruiter_profile.designation
+            ),
+            company_name=(
+                company.name
+                if company
+                else None
+            ),
+            profile_image_blob_path=None,
+        )
+
+    return CommunityCommentAuthorResponse(
+        user_id=user.id,
+        role=role,
+        display_name=user.email,
+    )
+
+
+def build_comment_response(
+    db: Session,
+    comment: CommunityComment,
+) -> CommunityCommentResponse:
+    return CommunityCommentResponse(
+        id=comment.id,
+        post_id=comment.post_id,
+        user_id=comment.user_id,
+        parent_comment_id=(
+            comment.parent_comment_id
+        ),
+        author=get_comment_author(
+            db,
+            comment.user_id,
+        ),
+        content=comment.content,
+        created_at=comment.created_at,
+        updated_at=comment.updated_at,
+    )
+
 
 @router.post(
     "/posts/{post_id}/comments",
@@ -47,10 +171,6 @@ def create_comment(
             detail="Comment content cannot be empty",
         )
 
-    # --------------------------------------------------------
-    # Verify post exists.
-    # --------------------------------------------------------
-
     post = (
         db.query(CommunityPost)
         .filter(
@@ -65,12 +185,7 @@ def create_comment(
             detail="Community post not found",
         )
 
-    # --------------------------------------------------------
-    # If this is a reply, verify the parent comment exists
-    # AND belongs to the same post.
-    # --------------------------------------------------------
-
-    if comment_data.parent_comment_id is not None:
+    if comment_data.parent_comment_id:
         parent_comment = (
             db.query(CommunityComment)
             .filter(
@@ -90,10 +205,6 @@ def create_comment(
                 ),
             )
 
-    # --------------------------------------------------------
-    # Create comment/reply.
-    # --------------------------------------------------------
-
     comment = CommunityComment(
         post_id=post_id,
         user_id=current_user.id,
@@ -107,12 +218,11 @@ def create_comment(
     db.commit()
     db.refresh(comment)
 
-    return comment
+    return build_comment_response(
+        db,
+        comment,
+    )
 
-
-# ============================================================
-# GET COMMENTS FOR A POST
-# ============================================================
 
 @router.get(
     "/posts/{post_id}/comments",
@@ -123,10 +233,6 @@ def get_post_comments(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # --------------------------------------------------------
-    # Verify post exists.
-    # --------------------------------------------------------
-
     post = (
         db.query(CommunityPost)
         .filter(
@@ -141,7 +247,7 @@ def get_post_comments(
             detail="Community post not found",
         )
 
-    return (
+    comments = (
         db.query(CommunityComment)
         .filter(
             CommunityComment.post_id == post_id
@@ -152,10 +258,14 @@ def get_post_comments(
         .all()
     )
 
+    return [
+        build_comment_response(
+            db,
+            comment,
+        )
+        for comment in comments
+    ]
 
-# ============================================================
-# UPDATE OWN COMMENT
-# ============================================================
 
 @router.put(
     "/comments/{comment_id}",
@@ -167,19 +277,10 @@ def update_comment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    comment = (
-        db.query(CommunityComment)
-        .filter(
-            CommunityComment.id == comment_id
-        )
-        .first()
+    comment = get_comment_or_404(
+        db,
+        comment_id,
     )
-
-    if not comment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Community comment not found",
-        )
 
     if comment.user_id != current_user.id:
         raise HTTPException(
@@ -203,12 +304,11 @@ def update_comment(
     db.commit()
     db.refresh(comment)
 
-    return comment
+    return build_comment_response(
+        db,
+        comment,
+    )
 
-
-# ============================================================
-# DELETE OWN COMMENT
-# ============================================================
 
 @router.delete(
     "/comments/{comment_id}",
@@ -219,19 +319,10 @@ def delete_comment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    comment = (
-        db.query(CommunityComment)
-        .filter(
-            CommunityComment.id == comment_id
-        )
-        .first()
+    comment = get_comment_or_404(
+        db,
+        comment_id,
     )
-
-    if not comment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Community comment not found",
-        )
 
     if comment.user_id != current_user.id:
         raise HTTPException(

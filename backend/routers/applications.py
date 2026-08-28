@@ -11,6 +11,9 @@ from models.job import Job
 from models.resume import Resume
 from models.user import User
 
+from services.agents import run_skill_gap_agent
+from services.ai_status import classify_ai_error
+
 from schemas.application import (
     ApplicationCreate,
     ApplicationResponse,
@@ -99,7 +102,46 @@ def create_application(
     db.commit()
     db.refresh(application)
 
-    return application
+    # --------------------------------------------------------
+    # Automatically run Skill Gap Agent
+    #
+    # The application is committed first so the candidate
+    # never loses a valid application because an AI analysis
+    # fails or a job has incomplete skill metadata.
+    # --------------------------------------------------------
+
+    ai_analysis_status = "COMPLETED"
+
+    try:
+        run_skill_gap_agent(
+            db=db,
+            user_id=current_user.id,
+            job_id=application.job_id,
+        )
+    except Exception as exc:
+        ai_analysis_status = classify_ai_error(
+            exc
+        )
+
+        db.rollback()
+
+        print(
+            "SKILL GAP AGENT FAILED:",
+            type(exc).__name__,
+            str(exc),
+        )
+
+    db.refresh(application)
+
+    response_data = ApplicationResponse.model_validate(
+        application
+    )
+
+    response_data.ai_analysis_status = (
+        ai_analysis_status
+    )
+
+    return response_data
 
 
 @router.get(

@@ -18,9 +18,14 @@ from dependencies.auth import get_current_user
 
 from models.community_post_images import CommunityPostImage
 from models.community_posts import CommunityPost
+from models.community_votes import CommunityVote, VoteType
+from models.company import Company
+from models.profile import Profile
+from models.recruiter_profile import RecruiterProfile
 from models.user import User
 
 from schemas.community_post import (
+    CommunityPostAuthorResponse,
     CommunityPostImageResponse,
     CommunityPostResponse,
     CommunityPostUpdate,
@@ -39,6 +44,218 @@ router = APIRouter(
     prefix="/community/posts",
     tags=["Community Posts"],
 )
+
+
+# ============================================================
+# HELPERS
+# ============================================================
+
+def get_post_or_404(
+    db: Session,
+    post_id: UUID,
+) -> CommunityPost:
+    post = (
+        db.query(CommunityPost)
+        .filter(
+            CommunityPost.id == post_id
+        )
+        .first()
+    )
+
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Community post not found",
+        )
+
+    return post
+
+
+def get_post_author(
+    db: Session,
+    user_id: UUID,
+) -> CommunityPostAuthorResponse:
+    user = (
+        db.query(User)
+        .filter(
+            User.id == user_id
+        )
+        .first()
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Post author not found",
+        )
+
+    role = (
+        user.role.value
+        if hasattr(user.role, "value")
+        else str(user.role)
+    )
+
+    # --------------------------------------------------------
+    # Candidate profile
+    # --------------------------------------------------------
+
+    profile = (
+        db.query(Profile)
+        .filter(
+            Profile.user_id == user.id
+        )
+        .first()
+    )
+
+    # --------------------------------------------------------
+    # Recruiter profile
+    # --------------------------------------------------------
+
+    recruiter_profile = (
+        db.query(RecruiterProfile)
+        .filter(
+            RecruiterProfile.user_id == user.id
+        )
+        .first()
+    )
+
+    company = None
+
+    if recruiter_profile:
+        company = (
+            db.query(Company)
+            .filter(
+                Company.id
+                == recruiter_profile.company_id
+            )
+            .first()
+        )
+
+    # --------------------------------------------------------
+    # Candidate author
+    # --------------------------------------------------------
+
+    if profile:
+        return CommunityPostAuthorResponse(
+            user_id=user.id,
+            role=role,
+            display_name=profile.full_name,
+            headline=profile.headline,
+            bio=profile.bio,
+            location=profile.location,
+            profile_image_blob_path=(
+                profile.profile_image_blob_path
+            ),
+            designation=None,
+            company_name=None,
+        )
+
+    # --------------------------------------------------------
+    # Recruiter author
+    #
+    # RecruiterProfile currently has no full_name field,
+    # so use email as the fallback display name until the
+    # recruiter profile has a dedicated name field.
+    # --------------------------------------------------------
+
+    if recruiter_profile:
+        return CommunityPostAuthorResponse(
+            user_id=user.id,
+            role=role,
+            display_name=user.email,
+            headline=recruiter_profile.designation,
+            bio=recruiter_profile.bio,
+            location=(
+                company.location
+                if company
+                else None
+            ),
+            profile_image_blob_path=None,
+            designation=(
+                recruiter_profile.designation
+            ),
+            company_name=(
+                company.name
+                if company
+                else None
+            ),
+        )
+
+    # --------------------------------------------------------
+    # Generic authenticated user fallback
+    # --------------------------------------------------------
+
+    return CommunityPostAuthorResponse(
+        user_id=user.id,
+        role=role,
+        display_name=user.email,
+    )
+
+
+def build_post_response(
+    db: Session,
+    post: CommunityPost,
+    current_user_id: UUID | None = None,
+) -> CommunityPostResponse:
+    votes = (
+        db.query(CommunityVote)
+        .filter(
+            CommunityVote.post_id == post.id
+        )
+        .all()
+    )
+
+    upvotes = sum(
+        1
+        for vote in votes
+        if vote.vote == VoteType.UP
+    )
+
+    downvotes = sum(
+        1
+        for vote in votes
+        if vote.vote == VoteType.DOWN
+    )
+
+    user_vote = None
+
+    if current_user_id is not None:
+        existing_vote = next(
+            (
+                vote
+                for vote in votes
+                if vote.user_id == current_user_id
+            ),
+            None,
+        )
+
+        if existing_vote:
+            user_vote = (
+                existing_vote.vote.value
+                if hasattr(
+                    existing_vote.vote,
+                    "value",
+                )
+                else str(
+                    existing_vote.vote
+                )
+            )
+
+    return CommunityPostResponse(
+        id=post.id,
+        user_id=post.user_id,
+        author=get_post_author(
+            db,
+            post.user_id,
+        ),
+        title=post.title,
+        content=post.content,
+        created_at=post.created_at,
+        updated_at=post.updated_at,
+        upvotes=upvotes,
+        downvotes=downvotes,
+        user_vote=user_vote,
+    )
 
 
 # ============================================================
@@ -189,10 +406,6 @@ async def create_post(
                 )
             )
 
-        # ----------------------------------------------------
-        # Save post + image metadata
-        # ----------------------------------------------------
-
         db.commit()
         db.refresh(post)
 
@@ -220,7 +433,11 @@ async def create_post(
 
         raise
 
-    return post
+    return build_post_response(
+        db,
+        post,
+        current_user.id,
+    )
 
 
 # ============================================================
@@ -235,7 +452,7 @@ def get_posts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return (
+    posts = (
         db.query(CommunityPost)
         .order_by(
             CommunityPost.created_at.desc()
@@ -243,14 +460,18 @@ def get_posts(
         .all()
     )
 
+    return [
+        build_post_response(
+            db,
+            post,
+            current_user.id,
+        )
+        for post in posts
+    ]
+
 
 # ============================================================
 # GET ALL IMAGES FOR A POST
-#
-# Returns metadata only.
-#
-# The frontend can use image_id with the endpoint below to
-# retrieve the actual image.
 # ============================================================
 
 @router.get(
@@ -262,27 +483,10 @@ def get_post_images(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # --------------------------------------------------------
-    # Verify post exists.
-    # --------------------------------------------------------
-
-    post = (
-        db.query(CommunityPost)
-        .filter(
-            CommunityPost.id == post_id
-        )
-        .first()
+    get_post_or_404(
+        db,
+        post_id,
     )
-
-    if not post:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Community post not found",
-        )
-
-    # --------------------------------------------------------
-    # Get image metadata.
-    # --------------------------------------------------------
 
     return (
         db.query(CommunityPostImage)
@@ -298,9 +502,6 @@ def get_post_images(
 
 # ============================================================
 # GET / STREAM ONE IMAGE
-#
-# The backend retrieves the image from Azure and streams it
-# to the authenticated user.
 # ============================================================
 
 @router.get(
@@ -312,10 +513,6 @@ def get_post_image(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # --------------------------------------------------------
-    # Find image and verify it belongs to this post.
-    # --------------------------------------------------------
-
     image = (
         db.query(CommunityPostImage)
         .filter(
@@ -330,10 +527,6 @@ def get_post_image(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Community post image not found",
         )
-
-    # --------------------------------------------------------
-    # Retrieve image from Azure Blob Storage.
-    # --------------------------------------------------------
 
     try:
         blob_client = (
@@ -364,10 +557,6 @@ def get_post_image(
             detail="Failed to retrieve image from storage",
         ) from exc
 
-    # --------------------------------------------------------
-    # Stream image to client.
-    # --------------------------------------------------------
-
     return StreamingResponse(
         iter([image_bytes]),
         media_type=image.content_type,
@@ -392,21 +581,16 @@ def get_post(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    post = (
-        db.query(CommunityPost)
-        .filter(
-            CommunityPost.id == post_id
-        )
-        .first()
+    post = get_post_or_404(
+        db,
+        post_id,
     )
 
-    if not post:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Community post not found",
-        )
-
-    return post
+    return build_post_response(
+        db,
+        post,
+        current_user.id,
+    )
 
 
 # ============================================================
@@ -423,19 +607,10 @@ def update_post(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    post = (
-        db.query(CommunityPost)
-        .filter(
-            CommunityPost.id == post_id
-        )
-        .first()
+    post = get_post_or_404(
+        db,
+        post_id,
     )
-
-    if not post:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Community post not found",
-        )
 
     if post.user_id != current_user.id:
         raise HTTPException(
@@ -487,7 +662,11 @@ def update_post(
     db.commit()
     db.refresh(post)
 
-    return post
+    return build_post_response(
+        db,
+        post,
+        current_user.id,
+    )
 
 
 # ============================================================
@@ -503,19 +682,10 @@ def delete_post(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    post = (
-        db.query(CommunityPost)
-        .filter(
-            CommunityPost.id == post_id
-        )
-        .first()
+    post = get_post_or_404(
+        db,
+        post_id,
     )
-
-    if not post:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Community post not found",
-        )
 
     if post.user_id != current_user.id:
         raise HTTPException(

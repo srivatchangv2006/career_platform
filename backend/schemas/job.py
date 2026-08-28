@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from uuid import UUID
+
 from models.job import JobStatus
 from pydantic import BaseModel, ConfigDict
 
@@ -30,11 +31,13 @@ class JobUpdate(BaseModel):
     application_deadline: date | None = None
     status: JobStatus | None = None
 
+
 class JobResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     company_id: UUID
+    company_name: str | None = None
     posted_by: UUID
     title: str
     description: str

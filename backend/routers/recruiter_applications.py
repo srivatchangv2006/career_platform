@@ -15,6 +15,7 @@ from dependencies import get_db
 from dependencies.roles import require_role
 
 from models.application import Application
+from models.company import Company
 from models.application_answer import ApplicationAnswer
 from models.application_status_history import (
     ApplicationStatusHistory,
@@ -84,6 +85,130 @@ def get_recruiter_applications(
     )
 
     return applications
+
+
+
+# ============================================================
+# RECRUITER APPLICANT SEARCH / FILTER
+# ============================================================
+
+@router.get(
+    "/applicants",
+)
+def get_recruiter_applicants(
+    job_id: UUID | None = None,
+    status_filter: str | None = None,
+    search: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_role("RECRUITER")
+    ),
+):
+    query = (
+        db.query(
+            Application,
+            User.email.label("candidate_email"),
+            Profile.full_name.label("candidate_name"),
+            Job.title.label("job_title"),
+        )
+        .join(
+            Job,
+            Job.id == Application.job_id,
+        )
+        .join(
+            User,
+            User.id == Application.user_id,
+        )
+        .outerjoin(
+            Profile,
+            Profile.user_id == Application.user_id,
+        )
+        .filter(
+            Job.posted_by == current_user.id
+        )
+    )
+
+    if job_id is not None:
+        query = query.filter(
+            Application.job_id == job_id
+        )
+
+    if status_filter:
+        normalized_status = (
+            status_filter.upper()
+        )
+
+        valid_statuses = {
+            "APPLIED",
+            "SCREENING",
+            "ASSESSMENT",
+            "INTERVIEW",
+            "OFFER",
+            "REJECTED",
+            "WITHDRAWN",
+        }
+
+        if normalized_status in valid_statuses:
+            query = query.filter(
+                Application.status
+                == normalized_status
+            )
+
+    if search:
+        search_pattern = (
+            f"%{search.strip()}%"
+        )
+
+        query = query.filter(
+            User.email.ilike(search_pattern)
+            | Profile.full_name.ilike(
+                search_pattern
+            )
+        )
+
+    rows = (
+        query
+        .order_by(
+            Application.applied_at.desc()
+        )
+        .all()
+    )
+
+    results = []
+
+    for (
+        application,
+        candidate_email,
+        candidate_name,
+        job_title,
+    ) in rows:
+        application_status = (
+            application.status.value
+            if hasattr(
+                application.status,
+                "value",
+            )
+            else str(
+                application.status
+            )
+        )
+
+        results.append(
+            {
+                "id": application.id,
+                "job_id": application.job_id,
+                "candidate_id": application.user_id,
+                "candidate_email": candidate_email,
+                "candidate_name": candidate_name,
+                "job_title": job_title,
+                "status": application_status,
+                "resume_id": application.resume_id,
+                "applied_at": application.applied_at,
+                "updated_at": application.updated_at,
+            }
+        )
+
+    return results
 
 
 # ============================================================
@@ -232,7 +357,10 @@ def get_recruiter_application_details(
     # --------------------------------------------------------
 
     skill_rows = (
-        db.query(UserSkill)
+        db.query(
+            UserSkill,
+            Skill.name.label("name"),
+        )
         .join(
             Skill,
             Skill.id == UserSkill.skill_id,
@@ -248,13 +376,14 @@ def get_recruiter_application_details(
 
     skills_response = [
         RecruiterCandidateSkill(
-            skill_id=row.skill_id,
-            proficiency=row.proficiency,
+            skill_id=user_skill.skill_id,
+            skill_name=skill_name,
+            proficiency=user_skill.proficiency,
             years_experience=(
-                row.years_experience
+                user_skill.years_experience
             ),
         )
-        for row in skill_rows
+        for user_skill, skill_name in skill_rows
     ]
 
     candidate_response = RecruiterCandidate(
@@ -324,9 +453,22 @@ def get_recruiter_application_details(
         else str(job.status)
     )
 
+    company = (
+        db.query(Company)
+        .filter(
+            Company.id == job.company_id
+        )
+        .first()
+    )
+
     job_response = RecruiterJobSummary(
         id=job.id,
         company_id=job.company_id,
+        company_name=(
+            company.name
+            if company
+            else None
+        ),
         title=job.title,
         description=job.description,
         location=job.location,

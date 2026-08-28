@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from dependencies import get_db
@@ -9,13 +9,37 @@ from dependencies.auth import get_current_user
 from models.user import User
 from models.user_follows import UserFollow
 
+from schemas.network import NetworkUserResponse
 from schemas.user_follow import UserFollowResponse
+
+from services.public_user import (
+    get_public_user,
+)
 
 
 router = APIRouter(
     prefix="/user-follows",
     tags=["User Follows"],
 )
+
+
+def build_follow_response(
+    db: Session,
+    follow: UserFollow,
+) -> UserFollowResponse:
+    return UserFollowResponse(
+        follower_id=follow.follower_id,
+        following_id=follow.following_id,
+        created_at=follow.created_at,
+        follower=get_public_user(
+            db,
+            follow.follower_id,
+        ),
+        following=get_public_user(
+            db,
+            follow.following_id,
+        ),
+    )
 
 
 @router.post(
@@ -36,7 +60,9 @@ def follow_user(
 
     target_user = (
         db.query(User)
-        .filter(User.id == user_id)
+        .filter(
+            User.id == user_id,
+        )
         .first()
     )
 
@@ -49,8 +75,10 @@ def follow_user(
     existing_follow = (
         db.query(UserFollow)
         .filter(
-            UserFollow.follower_id == current_user.id,
-            UserFollow.following_id == user_id,
+            UserFollow.follower_id
+            == current_user.id,
+            UserFollow.following_id
+            == user_id,
         )
         .first()
     )
@@ -70,7 +98,10 @@ def follow_user(
     db.commit()
     db.refresh(follow)
 
-    return follow
+    return build_follow_response(
+        db,
+        follow,
+    )
 
 
 @router.delete(
@@ -85,8 +116,10 @@ def unfollow_user(
     follow = (
         db.query(UserFollow)
         .filter(
-            UserFollow.follower_id == current_user.id,
-            UserFollow.following_id == user_id,
+            UserFollow.follower_id
+            == current_user.id,
+            UserFollow.following_id
+            == user_id,
         )
         .first()
     )
@@ -108,19 +141,71 @@ def unfollow_user(
     response_model=list[UserFollowResponse],
 )
 def get_my_following(
+    q: str | None = Query(
+        default=None,
+        min_length=2,
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return (
+    query = (
         db.query(UserFollow)
         .filter(
-            UserFollow.follower_id == current_user.id
+            UserFollow.follower_id
+            == current_user.id
         )
+    )
+
+    follows = (
+        query
         .order_by(
             UserFollow.created_at.desc()
         )
         .all()
     )
+
+    results = []
+
+    for follow in follows:
+        following = get_public_user(
+            db,
+            follow.following_id,
+        )
+
+        if not following:
+            continue
+
+        if q:
+            search = q.strip().lower()
+
+            searchable = " ".join(
+                [
+                    following["display_name"],
+                    following["handle"],
+                    following["role"],
+                    following["headline"] or "",
+                    following["location"] or "",
+                    following["company_name"] or "",
+                ]
+            ).lower()
+
+            if search not in searchable:
+                continue
+
+        results.append(
+            UserFollowResponse(
+                follower_id=follow.follower_id,
+                following_id=follow.following_id,
+                created_at=follow.created_at,
+                follower=get_public_user(
+                    db,
+                    follow.follower_id,
+                ),
+                following=following,
+            )
+        )
+
+    return results
 
 
 @router.get(
@@ -129,12 +214,18 @@ def get_my_following(
 )
 def get_user_followers(
     user_id: UUID,
+    q: str | None = Query(
+        default=None,
+        min_length=2,
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     target_user = (
         db.query(User)
-        .filter(User.id == user_id)
+        .filter(
+            User.id == user_id,
+        )
         .first()
     )
 
@@ -144,13 +235,59 @@ def get_user_followers(
             detail="User not found",
         )
 
-    return (
+    follows = (
         db.query(UserFollow)
         .filter(
-            UserFollow.following_id == user_id
+            UserFollow.following_id
+            == user_id
         )
         .order_by(
             UserFollow.created_at.desc()
         )
         .all()
     )
+
+    results = []
+
+    for follow in follows:
+        follower = get_public_user(
+            db,
+            follow.follower_id,
+        )
+
+        following = get_public_user(
+            db,
+            follow.following_id,
+        )
+
+        if not follower:
+            continue
+
+        if q:
+            search = q.strip().lower()
+
+            searchable = " ".join(
+                [
+                    follower["display_name"],
+                    follower["handle"],
+                    follower["role"],
+                    follower["headline"] or "",
+                    follower["location"] or "",
+                    follower["company_name"] or "",
+                ]
+            ).lower()
+
+            if search not in searchable:
+                continue
+
+        results.append(
+            UserFollowResponse(
+                follower_id=follow.follower_id,
+                following_id=follow.following_id,
+                created_at=follow.created_at,
+                follower=follower,
+                following=following,
+            )
+        )
+
+    return results

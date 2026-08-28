@@ -12,6 +12,7 @@ from models.conversation import Conversation
 from models.conversation_participant import ConversationParticipant
 from models.message import Message
 from models.user import User
+from services.public_user import get_public_user
 
 from schemas.conversation import (
     ConversationResponse,
@@ -69,7 +70,11 @@ def get_conversation_or_404(
             detail="Conversation not found",
         )
 
-    return conversation
+    return build_conversation_response(
+        db,
+        conversation,
+        current_user.id,
+    )
 
 
 def ensure_participant(
@@ -142,6 +147,74 @@ def find_existing_one_to_one_conversation(
     return None
 
 
+def build_conversation_response(
+    db: Session,
+    conversation: Conversation,
+    current_user_id: UUID,
+) -> ConversationResponse:
+    participant = (
+        db.query(ConversationParticipant)
+        .filter(
+            ConversationParticipant.conversation_id
+            == conversation.id,
+            ConversationParticipant.user_id
+            != current_user_id,
+        )
+        .first()
+    )
+
+    public_user = None
+
+    if participant:
+        public_user = get_public_user(
+            db,
+            participant.user_id,
+        )
+
+    return ConversationResponse(
+        id=conversation.id,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+        other_user_id=(
+            participant.user_id
+            if participant
+            else None
+        ),
+        other_user_email=(
+            public_user.get("email")
+            if public_user
+            else None
+        ),
+        other_user_name=(
+            public_user.get("display_name")
+            if public_user
+            else None
+        ),
+        other_user_role=(
+            public_user.get("role")
+            if public_user
+            else None
+        ),
+        other_user_headline=(
+            public_user.get("headline")
+            if public_user
+            else None
+        ),
+        other_user_company=(
+            public_user.get("company_name")
+            if public_user
+            else None
+        ),
+        other_user_avatar=(
+            public_user.get(
+                "profile_image_blob_path"
+            )
+            if public_user
+            else None
+        ),
+    )
+
+
 # ============================================================
 # CREATE OR GET ONE-TO-ONE CONVERSATION
 # ============================================================
@@ -182,7 +255,11 @@ def create_or_get_conversation(
     )
 
     if existing:
-        return existing
+        return build_conversation_response(
+            db,
+            existing,
+            current_user.id,
+        )
 
     conversation = Conversation()
 
@@ -205,7 +282,11 @@ def create_or_get_conversation(
     db.commit()
     db.refresh(conversation)
 
-    return conversation
+    return build_conversation_response(
+        db,
+        conversation,
+        current_user.id,
+    )
 
 
 # ============================================================
@@ -263,13 +344,19 @@ def get_my_conversations(
         other_user = (
             db.query(User)
             .filter(
-                User.id == other_participant.user_id
+                User.id
+                == other_participant.user_id
             )
             .first()
         )
 
         if not other_user:
             continue
+
+        public_user = get_public_user(
+            db,
+            other_user.id,
+        )
 
         last_message = (
             db.query(Message)
@@ -299,19 +386,68 @@ def get_my_conversations(
             ConversationSummaryResponse(
                 id=conversation.id,
                 other_user_id=other_user.id,
-                other_user_email=other_user.email,
+
+                other_user_email=(
+                    other_user.email
+                ),
+
+                other_user_name=(
+                    public_user.get(
+                        "display_name"
+                    )
+                    if public_user
+                    else None
+                ),
+
+                other_user_role=(
+                    public_user.get(
+                        "role"
+                    )
+                    if public_user
+                    else None
+                ),
+
+                other_user_headline=(
+                    public_user.get(
+                        "headline"
+                    )
+                    if public_user
+                    else None
+                ),
+
+                other_user_company=(
+                    public_user.get(
+                        "company_name"
+                    )
+                    if public_user
+                    else None
+                ),
+
+                other_user_avatar=(
+                    public_user.get(
+                        "profile_image_blob_path"
+                    )
+                    if public_user
+                    else None
+                ),
+
                 last_message=(
                     last_message.content
                     if last_message
                     else None
                 ),
+
                 last_message_at=(
                     last_message.created_at
                     if last_message
                     else None
                 ),
+
                 unread_count=unread_count,
-                updated_at=conversation.updated_at,
+
+                updated_at=(
+                    conversation.updated_at
+                ),
             )
         )
 

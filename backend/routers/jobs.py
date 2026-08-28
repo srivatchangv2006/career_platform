@@ -7,6 +7,7 @@ from dependencies import get_db
 from dependencies.auth import get_current_user
 from dependencies.roles import require_role
 
+from models.company import Company
 from models.job import Job
 from models.user import User
 
@@ -21,6 +22,41 @@ router = APIRouter(
     prefix="/jobs",
     tags=["Jobs"],
 )
+
+
+def build_job_response(job, company):
+    return JobResponse(
+        id=job.id,
+        company_id=job.company_id,
+        company_name=(
+            company.name
+            if company
+            else None
+        ),
+        posted_by=job.posted_by,
+        title=job.title,
+        description=job.description,
+        location=job.location,
+        employment_type=job.employment_type,
+        experience_level=job.experience_level,
+        salary_min=(
+            float(job.salary_min)
+            if job.salary_min is not None
+            else None
+        ),
+        salary_max=(
+            float(job.salary_max)
+            if job.salary_max is not None
+            else None
+        ),
+        currency=job.currency,
+        status=job.status,
+        application_deadline=(
+            job.application_deadline
+        ),
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
 
 
 # ==================================================
@@ -39,6 +75,21 @@ def create_job(
         require_role("RECRUITER", "ADMIN")
     ),
 ):
+    company = (
+        db.query(Company)
+        .filter(
+            Company.id
+            == job_data.company_id
+        )
+        .first()
+    )
+
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company not found",
+        )
+
     job = Job(
         posted_by=current_user.id,
         **job_data.model_dump(),
@@ -48,7 +99,10 @@ def create_job(
     db.commit()
     db.refresh(job)
 
-    return job
+    return build_job_response(
+        job,
+        company,
+    )
 
 
 # ==================================================
@@ -65,13 +119,63 @@ def get_jobs(
         get_current_user
     ),
 ):
-    return (
-        db.query(Job)
+    rows = (
+        db.query(Job, Company)
+        .outerjoin(
+            Company,
+            Company.id == Job.company_id,
+        )
         .order_by(
             Job.created_at.desc()
         )
         .all()
     )
+
+    return [
+        build_job_response(
+            job,
+            company,
+        )
+        for job, company in rows
+    ]
+
+
+# ==================================================
+# Recruiter/Admin: Get Own Jobs
+# ==================================================
+
+@router.get(
+    "/mine",
+    response_model=list[JobResponse],
+)
+def get_my_jobs(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_role("RECRUITER", "ADMIN")
+    ),
+):
+    rows = (
+        db.query(Job, Company)
+        .outerjoin(
+            Company,
+            Company.id == Job.company_id,
+        )
+        .filter(
+            Job.posted_by == current_user.id
+        )
+        .order_by(
+            Job.created_at.desc()
+        )
+        .all()
+    )
+
+    return [
+        build_job_response(
+            job,
+            company,
+        )
+        for job, company in rows
+    ]
 
 
 # ==================================================
@@ -89,21 +193,30 @@ def get_job(
         get_current_user
     ),
 ):
-    job = (
-        db.query(Job)
+    row = (
+        db.query(Job, Company)
+        .outerjoin(
+            Company,
+            Company.id == Job.company_id,
+        )
         .filter(
             Job.id == job_id
         )
         .first()
     )
 
-    if not job:
+    if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Job not found",
         )
 
-    return job
+    job, company = row
+
+    return build_job_response(
+        job,
+        company,
+    )
 
 
 # ==================================================
@@ -141,6 +254,22 @@ def update_job(
         exclude_unset=True
     )
 
+    if "company_id" in update_data:
+        company = (
+            db.query(Company)
+            .filter(
+                Company.id
+                == update_data["company_id"]
+            )
+            .first()
+        )
+
+        if not company:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Company not found",
+            )
+
     for field, value in update_data.items():
         setattr(
             job,
@@ -151,4 +280,15 @@ def update_job(
     db.commit()
     db.refresh(job)
 
-    return job
+    company = (
+        db.query(Company)
+        .filter(
+            Company.id == job.company_id
+        )
+        .first()
+    )
+
+    return build_job_response(
+        job,
+        company,
+    )

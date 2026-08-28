@@ -15,10 +15,18 @@ class ReferralRequestUpdate(BaseModel):
 
 class ReferralResponse(BaseModel):
     id: UUID
+
     opportunity_id: UUID
+
     requester_id: UUID
-    resume_id: UUID | None
+    requester_name: str
+
+    resume_id: UUID | None = None
+    resume_name: str | None = None
+
     message: str | None
+
     status: str
+
     created_at: datetime
     updated_at: datetime
