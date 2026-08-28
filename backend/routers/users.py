@@ -17,6 +17,18 @@ router = APIRouter(
 )
 
 
+# ============================================================
+# REGISTER USER
+#
+# Public registration endpoint.
+#
+# Allowed roles:
+#   - CANDIDATE
+#   - RECRUITER
+#
+# ADMIN cannot be created through public registration.
+# ============================================================
+
 @router.post(
     "/register",
     response_model=UserResponse,
@@ -26,13 +38,15 @@ def register_user(
     user_data: UserCreate,
     db: Session = Depends(get_db),
 ):
-    # -----------------------------------------------
-    # Check whether the email already exists
-    # -----------------------------------------------
+    # --------------------------------------------------------
+    # Check whether the email already exists.
+    # --------------------------------------------------------
 
     existing_user = (
         db.query(User)
-        .filter(User.email == user_data.email)
+        .filter(
+            User.email == user_data.email
+        )
         .first()
     )
 
@@ -42,16 +56,15 @@ def register_user(
             detail="Email already registered",
         )
 
-    # -----------------------------------------------
-    # Create user with requested registration role
+    # --------------------------------------------------------
+    # Create the user.
     #
     # UserCreate only permits:
-    # CANDIDATE
-    # RECRUITER
+    #   CANDIDATE
+    #   RECRUITER
     #
-    # ADMIN can never be created through this
-    # public registration endpoint.
-    # -----------------------------------------------
+    # ADMIN cannot be created through this endpoint.
+    # --------------------------------------------------------
 
     new_user = User(
         email=user_data.email,
@@ -65,14 +78,39 @@ def register_user(
     db.commit()
     db.refresh(new_user)
 
+    # --------------------------------------------------------
+    # Return all fields required by UserResponse.
+    #
+    # The previous implementation omitted "status",
+    # which caused FastAPI to return 500 after successfully
+    # inserting the user into PostgreSQL.
+    # --------------------------------------------------------
+
     return {
         "id": str(new_user.id),
         "email": new_user.email,
-        "role": new_user.role.value
-        if hasattr(new_user.role, "value")
-        else str(new_user.role),
+        "role": (
+            new_user.role.value
+            if hasattr(
+                new_user.role,
+                "value",
+            )
+            else str(new_user.role)
+        ),
+        "status": (
+            new_user.status.value
+            if hasattr(
+                new_user.status,
+                "value",
+            )
+            else str(new_user.status)
+        ),
     }
 
+
+# ============================================================
+# LOGIN
+# ============================================================
 
 @router.post(
     "/login",
@@ -84,7 +122,9 @@ def login_user(
 ):
     user = (
         db.query(User)
-        .filter(User.email == login_data.email)
+        .filter(
+            User.email == login_data.email
+        )
         .first()
     )
 
@@ -109,6 +149,10 @@ def login_user(
     }
 
 
+# ============================================================
+# GET CURRENT USER
+# ============================================================
+
 @router.get("/me")
 def get_my_profile(
     current_user: User = Depends(
@@ -117,17 +161,33 @@ def get_my_profile(
 ):
     role = (
         current_user.role.value
-        if hasattr(current_user.role, "value")
+        if hasattr(
+            current_user.role,
+            "value",
+        )
         else str(current_user.role)
+    )
+
+    user_status = (
+        current_user.status.value
+        if hasattr(
+            current_user.status,
+            "value",
+        )
+        else str(current_user.status)
     )
 
     return {
         "id": str(current_user.id),
         "email": current_user.email,
         "role": role,
-        "status": current_user.status,
+        "status": user_status,
     }
 
+
+# ============================================================
+# CANDIDATE-ONLY TEST ENDPOINT
+# ============================================================
 
 @router.get("/candidate-only")
 def candidate_only(
@@ -135,15 +195,17 @@ def candidate_only(
         require_role("CANDIDATE")
     ),
 ):
+    role = (
+        current_user.role.value
+        if hasattr(
+            current_user.role,
+            "value",
+        )
+        else str(current_user.role)
+    )
+
     return {
         "message": "Candidate access granted",
         "user_id": str(current_user.id),
-        "role": (
-            current_user.role.value
-            if hasattr(
-                current_user.role,
-                "value",
-            )
-            else str(current_user.role)
-        ),
+        "role": role,
     }

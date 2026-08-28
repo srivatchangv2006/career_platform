@@ -27,7 +27,18 @@ from models.user_follows import UserFollow
 from models.profile_views import ProfileView
 from models.notifications import Notification
 from models.recruiter_profile import RecruiterProfile
-from models.referral import Referral
+from models.community_post_images import CommunityPostImage
+from models.referral import (
+    Referral,
+    ReferralOpportunity,
+)
+from models.community_votes import (
+    CommunityVote,
+    VoteType,
+)
+from models.conversation import Conversation
+from models.conversation_participant import ConversationParticipant
+from models.message import Message
 from models.user_activity import UserActivity
 from models.career_goal import CareerGoal
 from models.career_recommendation import CareerRecommendation

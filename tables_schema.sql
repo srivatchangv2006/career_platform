@@ -407,16 +407,57 @@ CREATE TABLE public.recruiter_profiles (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
+CREATE TABLE public.referral_opportunities (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    posted_by uuid NOT NULL,
+    job_id uuid NOT NULL,
+    message text,
+    max_referrals integer,
+    status text DEFAULT 'OPEN'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT referral_opportunities_pkey PRIMARY KEY (id),
+    CONSTRAINT fk_referral_opportunities_posted_by
+        FOREIGN KEY (posted_by)
+        REFERENCES public.users(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_referral_opportunities_job
+        FOREIGN KEY (job_id)
+        REFERENCES public.jobs(id)
+        ON DELETE CASCADE,
+    CONSTRAINT chk_referral_opportunities_max_referrals
+        CHECK (
+            max_referrals IS NULL
+            OR max_referrals > 0
+        ),
+    CONSTRAINT chk_referral_opportunities_status
+        CHECK (
+            status IN ('OPEN', 'CLOSED')
+        )
+);
+
 CREATE TABLE public.referrals (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
+    opportunity_id uuid NOT NULL,
     requester_id uuid NOT NULL,
-    referrer_id uuid NOT NULL,
-    job_id uuid NOT NULL,
+    resume_id uuid,
     message text,
     status public.referral_request_status DEFAULT 'PENDING'::public.referral_request_status NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT chk_referrals_different_users CHECK ((requester_id <> referrer_id))
+    CONSTRAINT referrals_pkey PRIMARY KEY (id),
+    CONSTRAINT fk_referrals_opportunity
+        FOREIGN KEY (opportunity_id)
+        REFERENCES public.referral_opportunities(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_referrals_requester
+        FOREIGN KEY (requester_id)
+        REFERENCES public.users(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_referrals_resume
+        FOREIGN KEY (resume_id)
+        REFERENCES public.resumes(id)
+        ON DELETE SET NULL
 );
 
 CREATE TABLE public.resume_analysis (

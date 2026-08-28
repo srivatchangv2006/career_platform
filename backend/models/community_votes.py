@@ -1,11 +1,17 @@
 import uuid
 from datetime import datetime
+from enum import Enum
 
-from sqlalchemy import DateTime, Text, func
+from sqlalchemy import DateTime, Enum as SQLEnum, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base
+
+
+class VoteType(str, Enum):
+    UP = "UP"
+    DOWN = "DOWN"
 
 
 class CommunityVote(Base):
@@ -23,15 +29,21 @@ class CommunityVote(Base):
     )
 
     post_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True)
+        UUID(as_uuid=True),
+        nullable=True,
     )
 
     comment_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True)
+        UUID(as_uuid=True),
+        nullable=True,
     )
 
-    vote: Mapped[str] = mapped_column(
-        Text,
+    vote: Mapped[VoteType] = mapped_column(
+        SQLEnum(
+            VoteType,
+            name="vote_type",
+            create_type=False,
+        ),
         nullable=False,
     )
 

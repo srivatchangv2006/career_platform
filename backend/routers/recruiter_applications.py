@@ -1,28 +1,41 @@
+from datetime import datetime, timezone
+from io import BytesIO
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    status,
+)
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from datetime import datetime, timezone
-from models.application_status_history import (ApplicationStatusHistory,)
+
 from dependencies import get_db
 from dependencies.roles import require_role
 
 from models.application import Application
+from models.application_answer import ApplicationAnswer
+from models.application_status_history import (
+    ApplicationStatusHistory,
+)
+from schemas.application import ApplicationResponse
+from schemas.application_status_history import (
+    ApplicationStatusHistoryCreate,
+)
 from models.job import Job
+from models.job_screening_question import (
+    JobScreeningQuestion,
+)
 from models.profile import Profile
 from models.resume import Resume
 from models.skill import Skill
 from models.user import User
 from models.user_skill import UserSkill
-from schemas.application_status_history import (
-    ApplicationStatusHistoryCreate,
-)
-from fastapi.responses import StreamingResponse
-from io import BytesIO
 
-from services.azure_blob_download import download_blob
 from schemas.application import ApplicationResponse
 from schemas.recruiter_application import (
+    RecruiterApplicationAnswer,
     RecruiterApplicationDetailResponse,
     RecruiterApplicationDetails,
     RecruiterCandidate,
@@ -31,6 +44,8 @@ from schemas.recruiter_application import (
     RecruiterJobSummary,
     RecruiterResumeSummary,
 )
+
+from services.azure_blob_download import download_blob
 
 
 router = APIRouter(
@@ -113,14 +128,6 @@ def get_recruiter_application(
 
 # ============================================================
 # GET DETAILED APPLICANT INFORMATION
-#
-# Security:
-#   1. User must be a RECRUITER.
-#   2. Recruiter must own the job associated with the
-#      application.
-#
-# Candidate information is read-only here.
-# Password/authentication data is never returned.
 # ============================================================
 
 @router.get(
@@ -135,7 +142,8 @@ def get_recruiter_application_details(
     ),
 ):
     # --------------------------------------------------------
-    # 1. Find application + ensure recruiter owns the job
+    # 1. Verify application belongs to a job owned
+    #    by the current recruiter.
     # --------------------------------------------------------
 
     application = (
@@ -176,7 +184,7 @@ def get_recruiter_application_details(
         )
 
     # --------------------------------------------------------
-    # 3. Load candidate user
+    # 3. Load candidate
     # --------------------------------------------------------
 
     candidate = (
@@ -194,14 +202,13 @@ def get_recruiter_application_details(
         )
 
     # --------------------------------------------------------
-    # 4. Load candidate profile
+    # 4. Candidate profile
     # --------------------------------------------------------
 
     profile = (
         db.query(Profile)
         .filter(
-            Profile.user_id
-            == candidate.id
+            Profile.user_id == candidate.id
         )
         .first()
     )
@@ -209,21 +216,19 @@ def get_recruiter_application_details(
     profile_response = None
 
     if profile:
-        profile_response = (
-            RecruiterCandidateProfile(
-                id=profile.id,
-                full_name=profile.full_name,
-                headline=profile.headline,
-                bio=profile.bio,
-                location=profile.location,
-                years_of_experience=(
-                    profile.years_of_experience
-                ),
-            )
+        profile_response = RecruiterCandidateProfile(
+            id=profile.id,
+            full_name=profile.full_name,
+            headline=profile.headline,
+            bio=profile.bio,
+            location=profile.location,
+            years_of_experience=(
+                profile.years_of_experience
+            ),
         )
 
     # --------------------------------------------------------
-    # 5. Load candidate skills
+    # 5. Candidate skills
     # --------------------------------------------------------
 
     skill_rows = (
@@ -233,8 +238,7 @@ def get_recruiter_application_details(
             Skill.id == UserSkill.skill_id,
         )
         .filter(
-            UserSkill.user_id
-            == candidate.id
+            UserSkill.user_id == candidate.id
         )
         .order_by(
             Skill.name.asc()
@@ -253,10 +257,6 @@ def get_recruiter_application_details(
         for row in skill_rows
     ]
 
-    # --------------------------------------------------------
-    # 6. Candidate object
-    # --------------------------------------------------------
-
     candidate_response = RecruiterCandidate(
         id=candidate.id,
         email=candidate.email,
@@ -265,10 +265,9 @@ def get_recruiter_application_details(
     )
 
     # --------------------------------------------------------
-    # 7. Resume
+    # 6. Resume metadata
     #
-    # Only return safe resume metadata.
-    # Do not expose blob_container/blob_path.
+    # Do not expose blob_container or blob_path.
     # --------------------------------------------------------
 
     resume_response = None
@@ -277,54 +276,53 @@ def get_recruiter_application_details(
         resume = (
             db.query(Resume)
             .filter(
-                Resume.id
-                == application.resume_id,
-                Resume.user_id
-                == application.user_id,
+                Resume.id == application.resume_id,
+                Resume.user_id == application.user_id,
             )
             .first()
         )
 
         if resume:
-            resume_response = (
-                RecruiterResumeSummary(
-                    id=resume.id,
-                    file_name=resume.file_name,
-                    content_type=resume.content_type,
-                    file_size_bytes=(
-                        resume.file_size_bytes
-                    ),
-                    is_primary=resume.is_primary,
-                )
+            resume_response = RecruiterResumeSummary(
+                id=resume.id,
+                file_name=resume.file_name,
+                content_type=resume.content_type,
+                file_size_bytes=(
+                    resume.file_size_bytes
+                ),
+                is_primary=resume.is_primary,
             )
 
     # --------------------------------------------------------
-    # 8. Application
+    # 7. Application
     # --------------------------------------------------------
 
-    application_response = (
-        RecruiterApplicationDetails(
-            id=application.id,
-            job_id=application.job_id,
-            user_id=application.user_id,
-            resume_id=application.resume_id,
-            status=(
-                application.status.value
-                if hasattr(
-                    application.status,
-                    "value",
-                )
-                else str(application.status)
-            ),
-            cover_letter=application.cover_letter,
-            applied_at=application.applied_at,
-            updated_at=application.updated_at,
-        )
+    application_status = (
+        application.status.value
+        if hasattr(application.status, "value")
+        else str(application.status)
+    )
+
+    application_response = RecruiterApplicationDetails(
+        id=application.id,
+        job_id=application.job_id,
+        user_id=application.user_id,
+        resume_id=application.resume_id,
+        status=application_status,
+        cover_letter=application.cover_letter,
+        applied_at=application.applied_at,
+        updated_at=application.updated_at,
     )
 
     # --------------------------------------------------------
-    # 9. Job
+    # 8. Job
     # --------------------------------------------------------
+
+    job_status = (
+        job.status.value
+        if hasattr(job.status, "value")
+        else str(job.status)
+    )
 
     job_response = RecruiterJobSummary(
         id=job.id,
@@ -345,19 +343,8 @@ def get_recruiter_application_details(
             else None
         ),
         currency=job.currency,
-        status=(
-            job.status.value
-            if hasattr(
-                job.status,
-                "value",
-            )
-            else str(job.status)
-        ),
+        status=job_status,
     )
-
-    # --------------------------------------------------------
-    # 10. Final response
-    # --------------------------------------------------------
 
     return RecruiterApplicationDetailResponse(
         application=application_response,
@@ -365,33 +352,32 @@ def get_recruiter_application_details(
         job=job_response,
         resume=resume_response,
     )
+
+
 # ============================================================
-# RECRUITER: UPDATE APPLICATION STATUS
+# GET SCREENING ANSWERS FOR AN APPLICANT
 #
 # Security:
-#   1. User must be a RECRUITER.
-#   2. Recruiter must own the job associated with the
-#      application.
-#   3. The requested status transition must be valid.
-#   4. Every successful change creates an application
-#      status-history record.
+#   RECRUITER
+#       +
+#   application belongs to a job owned by recruiter
+#       ↓
+#   ALLOW
 # ============================================================
 
-@router.put(
-    "/{application_id}/status",
-    response_model=ApplicationResponse,
+@router.get(
+    "/{application_id}/answers",
+    response_model=list[RecruiterApplicationAnswer],
 )
-def update_recruiter_application_status(
+def get_recruiter_application_answers(
     application_id: UUID,
-    status_data: ApplicationStatusHistoryCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(
         require_role("RECRUITER")
     ),
 ):
     # --------------------------------------------------------
-    # 1. Find application belonging to a job owned by
-    #    the current recruiter.
+    # 1. Verify recruiter owns the associated job.
     # --------------------------------------------------------
 
     application = (
@@ -414,100 +400,58 @@ def update_recruiter_application_status(
         )
 
     # --------------------------------------------------------
-    # 2. Get current and requested statuses.
+    # 2. Load questions and answers.
+    #
+    # Only answers submitted for this application are
+    # returned.
     # --------------------------------------------------------
 
-    current_status = (
-        application.status.value
-        if hasattr(
-            application.status,
-            "value",
+    rows = (
+        db.query(
+            ApplicationAnswer.id,
+            ApplicationAnswer.question_id,
+            JobScreeningQuestion.question,
+            JobScreeningQuestion.question_type,
+            JobScreeningQuestion.is_required,
+            JobScreeningQuestion.display_order,
+            ApplicationAnswer.answer,
         )
-        else str(application.status)
-    )
-
-    requested_status = (
-        status_data.status.value
-        if hasattr(
-            status_data.status,
-            "value",
+        .join(
+            JobScreeningQuestion,
+            JobScreeningQuestion.id
+            == ApplicationAnswer.question_id,
         )
-        else str(status_data.status)
-    )
-
-    # --------------------------------------------------------
-    # 3. Allowed recruiter transitions.
-    # --------------------------------------------------------
-
-    allowed_transitions = {
-        "APPLIED": {
-            "SCREENING",
-            "REJECTED",
-        },
-        "SCREENING": {
-            "ASSESSMENT",
-            "INTERVIEW",
-            "REJECTED",
-        },
-        "ASSESSMENT": {
-            "INTERVIEW",
-            "REJECTED",
-        },
-        "INTERVIEW": {
-            "OFFER",
-            "REJECTED",
-        },
-        "OFFER": {
-            "REJECTED",
-        },
-    }
-
-    # --------------------------------------------------------
-    # 4. Reject invalid transitions.
-    # --------------------------------------------------------
-
-    allowed_next_statuses = allowed_transitions.get(
-        current_status,
-        set(),
-    )
-
-    if requested_status not in allowed_next_statuses:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Invalid application status transition: "
-                f"{current_status} -> {requested_status}"
-            ),
+        .filter(
+            ApplicationAnswer.application_id
+            == application_id,
+            JobScreeningQuestion.job_id
+            == application.job_id,
         )
-
-    # --------------------------------------------------------
-    # 5. Update application status.
-    # --------------------------------------------------------
-
-    application.status = status_data.status
-    application.updated_at = datetime.now(
-        timezone.utc
+        .order_by(
+            JobScreeningQuestion.display_order.asc(),
+            ApplicationAnswer.created_at.asc(),
+        )
+        .all()
     )
 
-    # --------------------------------------------------------
-    # 6. Create status-history record.
-    # --------------------------------------------------------
+    return [
+        RecruiterApplicationAnswer(
+            id=row.id,
+            question_id=row.question_id,
+            question=row.question,
+            question_type=row.question_type,
+            is_required=row.is_required,
+            display_order=row.display_order,
+            answer=row.answer,
+        )
+        for row in rows
+    ]
 
-    history = ApplicationStatusHistory(
-        application_id=application.id,
-        status=status_data.status,
-        changed_by=current_user.id,
-        notes=status_data.notes,
-    )
 
-    db.add(history)
-
-    db.commit()
-    db.refresh(application)
-
-    return application
 # ============================================================
-# RECRUITER: UPDATE APPLICATION STATUS
+# UPDATE APPLICATION STATUS
+#
+# Recruiter controls hiring-stage transitions.
 # ============================================================
 
 @router.put(
@@ -523,8 +467,7 @@ def update_recruiter_application_status(
     ),
 ):
     # --------------------------------------------------------
-    # 1. Find application and verify that the recruiter
-    #    owns the associated job.
+    # 1. Verify recruiter owns the job.
     # --------------------------------------------------------
 
     application = (
@@ -563,7 +506,7 @@ def update_recruiter_application_status(
     )
 
     # --------------------------------------------------------
-    # 3. Recruiter-controlled workflow.
+    # 3. Valid recruiter transitions.
     # --------------------------------------------------------
 
     allowed_transitions = {
@@ -584,6 +527,9 @@ def update_recruiter_application_status(
             "OFFER",
             "REJECTED",
         },
+        "OFFER": {
+            "REJECTED",
+        },
     }
 
     allowed_next_statuses = allowed_transitions.get(
@@ -595,7 +541,7 @@ def update_recruiter_application_status(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"Invalid application status transition: "
+                "Invalid application status transition: "
                 f"{current_status} -> {requested_status}"
             ),
         )
@@ -610,7 +556,7 @@ def update_recruiter_application_status(
     )
 
     # --------------------------------------------------------
-    # 5. Record status history.
+    # 5. Create status history.
     # --------------------------------------------------------
 
     history = ApplicationStatusHistory(
@@ -627,6 +573,20 @@ def update_recruiter_application_status(
 
     return application
 
+
+# ============================================================
+# DOWNLOAD APPLICANT RESUME
+#
+# Security:
+#   RECRUITER
+#       +
+#   application belongs to recruiter's own job
+#       +
+#   resume belongs to the applicant
+#       ↓
+#   ALLOW
+# ============================================================
+
 @router.get(
     "/{application_id}/resume",
 )
@@ -637,6 +597,10 @@ def download_recruiter_resume(
         require_role("RECRUITER")
     ),
 ):
+    # --------------------------------------------------------
+    # 1. Verify recruiter owns associated job.
+    # --------------------------------------------------------
+
     application = (
         db.query(Application)
         .join(
@@ -656,11 +620,19 @@ def download_recruiter_resume(
             detail="Application not found",
         )
 
+    # --------------------------------------------------------
+    # 2. Resume must exist.
+    # --------------------------------------------------------
+
     if not application.resume_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No resume attached to this application",
         )
+
+    # --------------------------------------------------------
+    # 3. Verify resume belongs to candidate.
+    # --------------------------------------------------------
 
     resume = (
         db.query(Resume)
@@ -677,6 +649,10 @@ def download_recruiter_resume(
             detail="Resume not found",
         )
 
+    # --------------------------------------------------------
+    # 4. Download from Azure.
+    # --------------------------------------------------------
+
     try:
         file_bytes = download_blob(
             container_name=resume.blob_container,
@@ -688,9 +664,16 @@ def download_recruiter_resume(
             detail="Failed to download resume",
         ) from exc
 
+    # --------------------------------------------------------
+    # 5. Return file.
+    # --------------------------------------------------------
+
     return StreamingResponse(
         BytesIO(file_bytes),
-        media_type=resume.content_type or "application/pdf",
+        media_type=(
+            resume.content_type
+            or "application/pdf"
+        ),
         headers={
             "Content-Disposition": (
                 f'attachment; filename="{resume.file_name}"'

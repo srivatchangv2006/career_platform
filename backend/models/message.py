@@ -1,23 +1,15 @@
 import uuid
 from datetime import datetime
-from enum import Enum
 
-from sqlalchemy import DateTime, Enum as SQLEnum, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base
 
 
-class ConnectionStatus(str, Enum):
-    PENDING = "PENDING"
-    ACCEPTED = "ACCEPTED"
-    REJECTED = "REJECTED"
-    BLOCKED = "BLOCKED"
-
-
-class Connection(Base):
-    __tablename__ = "connections"
+class Message(Base):
+    __tablename__ = "messages"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -25,24 +17,33 @@ class Connection(Base):
         server_default=func.gen_random_uuid(),
     )
 
-    requester_id: Mapped[uuid.UUID] = mapped_column(
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        nullable=False,
-    )
-
-    receiver_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=False,
-    )
-
-    status: Mapped[ConnectionStatus] = mapped_column(
-        SQLEnum(
-            ConnectionStatus,
-            name="connection_status",
-            create_type=False,
+        ForeignKey(
+            "conversations.id",
+            ondelete="CASCADE",
         ),
         nullable=False,
-        server_default="PENDING",
+    )
+
+    sender_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "users.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+
+    content: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    is_read: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="false",
     )
 
     created_at: Mapped[datetime] = mapped_column(

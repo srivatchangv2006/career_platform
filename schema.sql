@@ -861,16 +861,57 @@ ALTER TABLE public.recruiter_profiles OWNER TO postgres;
 -- Name: referrals; Type: TABLE; Schema: public; Owner: postgres
 --
 
+CREATE TABLE public.referral_opportunities (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    posted_by uuid NOT NULL,
+    job_id uuid NOT NULL,
+    message text,
+    max_referrals integer,
+    status text DEFAULT 'OPEN'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT referral_opportunities_pkey PRIMARY KEY (id),
+    CONSTRAINT fk_referral_opportunities_posted_by
+        FOREIGN KEY (posted_by)
+        REFERENCES public.users(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_referral_opportunities_job
+        FOREIGN KEY (job_id)
+        REFERENCES public.jobs(id)
+        ON DELETE CASCADE,
+    CONSTRAINT chk_referral_opportunities_max_referrals
+        CHECK (
+            max_referrals IS NULL
+            OR max_referrals > 0
+        ),
+    CONSTRAINT chk_referral_opportunities_status
+        CHECK (
+            status IN ('OPEN', 'CLOSED')
+        )
+);
+
 CREATE TABLE public.referrals (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
+    opportunity_id uuid NOT NULL,
     requester_id uuid NOT NULL,
-    referrer_id uuid NOT NULL,
-    job_id uuid NOT NULL,
+    resume_id uuid,
     message text,
     status public.referral_request_status DEFAULT 'PENDING'::public.referral_request_status NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT chk_referrals_different_users CHECK ((requester_id <> referrer_id))
+    CONSTRAINT referrals_pkey PRIMARY KEY (id),
+    CONSTRAINT fk_referrals_opportunity
+        FOREIGN KEY (opportunity_id)
+        REFERENCES public.referral_opportunities(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_referrals_requester
+        FOREIGN KEY (requester_id)
+        REFERENCES public.users(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_referrals_resume
+        FOREIGN KEY (resume_id)
+        REFERENCES public.resumes(id)
+        ON DELETE SET NULL
 );
 
 
@@ -1838,31 +1879,35 @@ CREATE INDEX idx_recruiter_profiles_company_id ON public.recruiter_profiles USIN
 
 
 --
--- Name: idx_referrals_job; Type: INDEX; Schema: public; Owner: postgres
+-- Referral indexes
 --
 
-CREATE INDEX idx_referrals_job ON public.referrals USING btree (job_id);
+CREATE INDEX idx_referral_opportunities_job
+    ON public.referral_opportunities USING btree (job_id);
 
 
---
--- Name: idx_referrals_referrer; Type: INDEX; Schema: public; Owner: postgres
---
-
-CREATE INDEX idx_referrals_referrer ON public.referrals USING btree (referrer_id);
+CREATE INDEX idx_referral_opportunities_posted_by
+    ON public.referral_opportunities USING btree (posted_by);
 
 
---
--- Name: idx_referrals_requester; Type: INDEX; Schema: public; Owner: postgres
---
-
-CREATE INDEX idx_referrals_requester ON public.referrals USING btree (requester_id);
+CREATE INDEX idx_referral_opportunities_status
+    ON public.referral_opportunities USING btree (status);
 
 
---
--- Name: idx_referrals_status; Type: INDEX; Schema: public; Owner: postgres
---
+CREATE INDEX idx_referrals_opportunity
+    ON public.referrals USING btree (opportunity_id);
 
-CREATE INDEX idx_referrals_status ON public.referrals USING btree (status);
+
+CREATE INDEX idx_referrals_requester
+    ON public.referrals USING btree (requester_id);
+
+
+CREATE INDEX idx_referrals_status
+    ON public.referrals USING btree (status);
+
+
+CREATE INDEX idx_referrals_resume
+    ON public.referrals USING btree (resume_id);
 
 
 --
@@ -2388,22 +2433,6 @@ ALTER TABLE ONLY public.recruiter_profiles
 
 ALTER TABLE ONLY public.recruiter_profiles
     ADD CONSTRAINT fk_recruiter_profiles_user FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
-
-
---
--- Name: referrals fk_referrals_job; Type: FK CONSTRAINT; Schema: public; Owner: postgres
---
-
-ALTER TABLE ONLY public.referrals
-    ADD CONSTRAINT fk_referrals_job FOREIGN KEY (job_id) REFERENCES public.jobs(id) ON DELETE CASCADE;
-
-
---
--- Name: referrals fk_referrals_referrer; Type: FK CONSTRAINT; Schema: public; Owner: postgres
---
-
-ALTER TABLE ONLY public.referrals
-    ADD CONSTRAINT fk_referrals_referrer FOREIGN KEY (referrer_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 
 --

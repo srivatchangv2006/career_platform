@@ -69,3 +69,11 @@ class RecruiterResumeDownloadResponse(BaseModel):
     resume_id: UUID
     file_name: str
     content_type: str | None
+class RecruiterApplicationAnswer(BaseModel):
+    id: UUID
+    question_id: UUID
+    question: str
+    question_type: str
+    is_required: bool
+    display_order: int
+    answer: str | None

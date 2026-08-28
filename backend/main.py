@@ -27,6 +27,9 @@ from routers.resumes import router as resumes_router
 from routers.skill_gap_analysis import (
     router as skill_gap_analysis_router,
 )
+from routers.recruiter_dashboard import (
+    router as recruiter_dashboard_router,
+)
 from routers.job_recommendations import (
     router as job_recommendations_router,
 )
@@ -64,11 +67,42 @@ from routers.recruiter_applications import (
 from routers.recruiter_interviews import (
     router as recruiter_interviews_router,
 )
+from routers.user_follows import router as user_follows_router
+from routers.connections import router as connections_router
+from routers.referral_opportunities import (
+    router as referral_opportunities_router,
+)
+from routers.referral_requests import (
+    router as referral_requests_router,
+)
+from routers.community_posts import (
+    router as community_posts_router,
+)
+from routers.community_comments import (
+    router as community_comments_router,
+)
+from routers.community_votes import (
+    router as community_votes_router,
+)
+from routers.recruiter_profiles import (
+    router as recruiter_profiles_router,
+)
+from routers.messages import router as messages_router
 app.include_router(interview_preparation_router)
 app.include_router(agent_feedback_router)
 app.include_router(agent_task_steps_router)
 app.include_router(agent_messages_router)
 app.include_router(users_router)
+app.include_router(messages_router)
+app.include_router(recruiter_profiles_router)
+app.include_router(community_votes_router)
+app.include_router(community_comments_router)
+app.include_router(community_posts_router)
+app.include_router(referral_requests_router)
+app.include_router(referral_opportunities_router)
+app.include_router(user_follows_router)
+app.include_router(connections_router)
+app.include_router(recruiter_dashboard_router)
 app.include_router(recruiter_interviews_router)
 app.include_router(recruiter_applications_router)
 app.include_router(application_ai_activity_router)
